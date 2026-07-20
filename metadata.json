@@ -1,0 +1,6 @@
+{
+  "name": "Smart Music Screensaver",
+  "description": "A beautiful smart screensaver that captures playing system music, displays synchronized lyrics, and generates a dynamic beat-synced audio visualizer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

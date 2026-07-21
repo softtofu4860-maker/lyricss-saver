@@ -1652,6 +1652,17 @@ fun ImmersiveScreensaverView(
     var isControlsPinned by remember {
         mutableStateOf(sharedPrefs.getBoolean("controls_pinned", true))
     }
+    var currentTheme by remember {
+        mutableStateOf(
+            try {
+                ScreensaverTheme.valueOf(
+                    sharedPrefs.getString("screensaver_theme", ScreensaverTheme.CLASSIC_NEON.name) ?: ScreensaverTheme.CLASSIC_NEON.name
+                )
+            } catch (e: Exception) {
+                ScreensaverTheme.CLASSIC_NEON
+            }
+        )
+    }
 
     // Auto-hide controls when playing after 6 seconds of inactivity (if not pinned)
     LaunchedEffect(showControls, lastInteractionTime, mediaState.isPlaying, isControlsPinned) {
@@ -1698,27 +1709,45 @@ fun ImmersiveScreensaverView(
                 indication = null
             )
     ) {
-        // 1. Ambient blurred background using downscaled album artwork to save 99% CPU/GPU overhead!
+        // 1. Full-screen background artwork/radial gradient based on theme
         val ambientBgBitmap = remember(mediaState.albumArt) {
-            mediaState.albumArt?.let { raw ->
-                try {
-                    // Downscale to 64x64 for a highly performant yet beautifully smooth ambient background blur
-                    android.graphics.Bitmap.createScaledBitmap(raw, 64, 64, true).asImageBitmap()
-                } catch (e: Exception) {
-                    raw.asImageBitmap()
+            mediaState.albumArt?.asImageBitmap()
+        }
+
+        if (ambientBgBitmap != null) {
+            if (currentTheme == ScreensaverTheme.FULL_ART_MINIMAL) {
+                // Theme 2: Full-screen opaque album artwork as background (vivid, eye-catching style)
+                Image(
+                    bitmap = ambientBgBitmap,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(if (isNightTime) 0.65f else 0.85f) // Slightly dimmed for legibility, automatically softened at night
+                )
+            } else {
+                // Theme 1: Ambient blurred background (classic smooth aesthetic)
+                val blurredBgBitmap = remember(mediaState.albumArt) {
+                    mediaState.albumArt?.let { raw ->
+                        try {
+                            android.graphics.Bitmap.createScaledBitmap(raw, 64, 64, true).asImageBitmap()
+                        } catch (e: Exception) {
+                            raw.asImageBitmap()
+                        }
+                    }
+                }
+                if (blurredBgBitmap != null) {
+                    Image(
+                        bitmap = blurredBgBitmap,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (isNightTime) 0.12f else 0.28f)
+                            .blur(28.dp)
+                    )
                 }
             }
-        }
-        if (ambientBgBitmap != null) {
-            Image(
-                bitmap = ambientBgBitmap,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .alpha(if (isNightTime) 0.008f else 0.02f) // Auto-dim ambient artwork at night
-                    .blur(28.dp)
-            )
         } else {
             Box(
                 modifier = Modifier
@@ -1743,23 +1772,43 @@ fun ImmersiveScreensaverView(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    alpha = if (isNightTime) 0.35f else 0.85f // Auto-dim music visualizer at night
+                    alpha = if (isNightTime) 0.25f else 0.65f // Softer opacity to not clash with background elements
                 }
         )
 
-        // Dark dim layer for high visual contrast and legibility (darkened automatically at night)
+        // 3. Contrast Overlay Gradient (Tailored for theme readability)
+        val overlayBrush = remember(currentTheme, isLandscape, isNightTime) {
+            if (currentTheme == ScreensaverTheme.FULL_ART_MINIMAL) {
+                if (isLandscape) {
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = if (isNightTime) 0.50f else 0.25f),
+                            Color.Black.copy(alpha = if (isNightTime) 0.88f else 0.75f) // Darken the right side behind lyrics
+                        )
+                    )
+                } else {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = if (isNightTime) 0.40f else 0.20f),
+                            Color.Black.copy(alpha = if (isNightTime) 0.90f else 0.80f) // Darken bottom side behind controls
+                        )
+                    )
+                }
+            } else {
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.Black.copy(alpha = if (isNightTime) 0.85f else 0.70f),
+                        Color.Black.copy(alpha = if (isNightTime) 0.55f else 0.40f),
+                        Color.Black.copy(alpha = if (isNightTime) 0.95f else 0.85f)
+                    )
+                )
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Black.copy(alpha = if (isNightTime) 0.80f else 0.65f),
-                            Color.Black.copy(alpha = if (isNightTime) 0.35f else 0.0f),
-                            Color.Black.copy(alpha = if (isNightTime) 0.90f else 0.80f)
-                        )
-                    )
-                )
+                .background(overlayBrush)
         )
 
         // Main layout container (with top status bar and side-by-side or stacked layout)
@@ -1772,9 +1821,146 @@ fun ImmersiveScreensaverView(
                 }
                 .padding(top = if (isLandscape) 52.dp else 64.dp)
         ) {
-            if (isLandscape) {
-                // Landscape: 2-Column Asymmetric Layout
-                Row(
+            if (currentTheme == ScreensaverTheme.FULL_ART_MINIMAL) {
+                if (isLandscape) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(28.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        // Left Column: Minimal Player Card aligned to bottom-left
+                        Column(
+                            modifier = Modifier
+                                .weight(1.0f)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.Bottom,
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            MinimalPlayerCard(
+                                mediaState = mediaState,
+                                currentPositionMs = currentPositionMs,
+                                primaryColor = primaryColor,
+                                secondaryColor = secondaryColor,
+                                onLastInteraction = { lastInteractionTime = System.currentTimeMillis() },
+                                modifier = Modifier.padding(bottom = 16.dp, start = 12.dp)
+                            )
+                        }
+
+                        // Right Column: Lyrics Scroll + Vertical Tategaki Text
+                        Row(
+                            modifier = Modifier
+                                .weight(1.4f)
+                                .fillMaxHeight(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            ) {
+                                if (lyricsLines.isNotEmpty()) {
+                                    MinimalLyricsView(
+                                        lines = lyricsLines,
+                                        activeIndex = lyricsActiveIndex,
+                                        activeColor = activeLyricColor,
+                                        onLineClicked = { seekPosMs ->
+                                            try {
+                                                MusicNotificationListener.activeController?.transportControls?.seekTo(seekPosMs)
+                                                currentPositionMs = seekPosMs
+                                                lastInteractionTime = System.currentTimeMillis()
+                                            } catch (e: Exception) {}
+                                        },
+                                        onBackgroundClicked = {
+                                            showControls = !showControls
+                                            lastInteractionTime = System.currentTimeMillis()
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            CircularProgressIndicator(color = primaryColor, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Text("가사 불러오는 중...", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            VerticalTategakiOverlay(
+                                activeLineText = if (lyricsActiveIndex >= 0 && lyricsActiveIndex < lyricsLines.size) {
+                                    lyricsLines[lyricsActiveIndex].text
+                                } else "",
+                                modifier = Modifier
+                                    .width(44.dp)
+                                    .fillMaxHeight()
+                                    .padding(bottom = 32.dp, top = 16.dp)
+                            )
+                        }
+                    }
+                } else {
+                    // Portrait minimal
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .fillMaxWidth()
+                        ) {
+                            if (lyricsLines.isNotEmpty()) {
+                                MinimalLyricsView(
+                                    lines = lyricsLines,
+                                    activeIndex = lyricsActiveIndex,
+                                    activeColor = activeLyricColor,
+                                    onLineClicked = { seekPosMs ->
+                                        try {
+                                            MusicNotificationListener.activeController?.transportControls?.seekTo(seekPosMs)
+                                            currentPositionMs = seekPosMs
+                                            lastInteractionTime = System.currentTimeMillis()
+                                        } catch (e: Exception) {}
+                                    },
+                                    onBackgroundClicked = {
+                                        showControls = !showControls
+                                        lastInteractionTime = System.currentTimeMillis()
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        CircularProgressIndicator(color = primaryColor, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text("가사 불러오는 중...", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        MinimalPlayerCard(
+                            mediaState = mediaState,
+                            currentPositionMs = currentPositionMs,
+                            primaryColor = primaryColor,
+                            secondaryColor = secondaryColor,
+                            onLastInteraction = { lastInteractionTime = System.currentTimeMillis() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 24.dp)
+                        )
+                    }
+                }
+            } else {
+                if (isLandscape) {
+                    // Landscape: 2-Column Asymmetric Layout
+                    Row(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 24.dp, vertical = 12.dp),
@@ -2128,6 +2314,7 @@ fun ImmersiveScreensaverView(
                 }
             }
         }
+    }
 
         // Header Overlay (Always small and classy, animated on tap)
         AnimatedVisibility(
@@ -2264,6 +2451,20 @@ fun ImmersiveScreensaverView(
                     )
 
                     Box(modifier = Modifier.width(1.dp).height(16.dp).background(Color.White.copy(alpha = 0.2f)))
+
+                    VisualizerSmallIconToggle(
+                        icon = Icons.Rounded.Palette,
+                        active = currentTheme == ScreensaverTheme.FULL_ART_MINIMAL,
+                        onClick = {
+                            currentTheme = if (currentTheme == ScreensaverTheme.CLASSIC_NEON) {
+                                ScreensaverTheme.FULL_ART_MINIMAL
+                            } else {
+                                ScreensaverTheme.CLASSIC_NEON
+                            }
+                            sharedPrefs.edit().putString("screensaver_theme", currentTheme.name).apply()
+                            lastInteractionTime = System.currentTimeMillis()
+                        }
+                    )
 
                     VisualizerSmallIconToggle(
                         icon = if (isControlsPinned) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
@@ -3781,6 +3982,208 @@ fun SidebarLyricsDetailView(
                     )
                 }
             }
+        }
+    }
+}
+
+enum class ScreensaverTheme {
+    CLASSIC_NEON,
+    FULL_ART_MINIMAL
+}
+
+@Composable
+fun MinimalPlayerCard(
+    mediaState: com.example.service.MediaState,
+    currentPositionMs: Long,
+    primaryColor: Color,
+    secondaryColor: Color,
+    onLastInteraction: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color.Black.copy(alpha = 0.65f)
+        ),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+        modifier = modifier
+            .widthIn(max = 340.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Artwork thumbnail
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .background(Color(0xFF202025), RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    if (mediaState.albumArt != null) {
+                        Image(
+                            bitmap = mediaState.albumArt.asImageBitmap(),
+                            contentDescription = "썸네일",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Audiotrack,
+                            contentDescription = "곡",
+                            tint = Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(24.dp).align(Alignment.Center)
+                        )
+                    }
+                }
+
+                // Title and Artist
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = mediaState.title ?: "재생 중인 곡 없음",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = mediaState.artist ?: "알 수 없는 아티스트",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Controls
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    IconButton(
+                        onClick = {
+                            try {
+                                MusicNotificationListener.activeController?.transportControls?.skipToPrevious()
+                                onLastInteraction()
+                            } catch (e: Exception) {}
+                        },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipPrevious,
+                            contentDescription = "이전 곡",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(primaryColor, CircleShape)
+                            .clickable {
+                                try {
+                                    val controller = MusicNotificationListener.activeController
+                                    if (mediaState.isPlaying) {
+                                        controller?.transportControls?.pause()
+                                    } else {
+                                        controller?.transportControls?.play()
+                                    }
+                                    onLastInteraction()
+                                } catch (e: Exception) {}
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (mediaState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = "재생",
+                            tint = Color.Black,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            try {
+                                MusicNotificationListener.activeController?.transportControls?.skipToNext()
+                                onLastInteraction()
+                            } catch (e: Exception) {}
+                        },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SkipNext,
+                            contentDescription = "다음 곡",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Thin progress line
+            val progress = if (mediaState.durationMs > 0) currentPositionMs.toFloat() / mediaState.durationMs else 0f
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(1.5.dp))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .fillMaxHeight()
+                        .background(primaryColor, RoundedCornerShape(1.5.dp))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun VerticalTategakiOverlay(
+    activeLineText: String,
+    modifier: Modifier = Modifier
+) {
+    val cleanText = remember(activeLineText) {
+        if (activeLineText.isEmpty()) {
+            ""
+        } else {
+            // Take first line if there is a newline
+            val firstLine = activeLineText.split("\n").firstOrNull() ?: ""
+            // Filter out common brackets/punctuation to look extremely tidy
+            firstLine.replace(Regex("[\\p{Punct}\\s]"), "").trim()
+        }
+    }
+
+    val characters = remember(cleanText) {
+        cleanText.map { it.toString() }.take(15) // take up to 15 characters to avoid spilling off the screen
+    }
+
+    LazyColumn(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        userScrollEnabled = false
+    ) {
+        items(characters) { char ->
+            Text(
+                text = char,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Light,
+                color = Color.White.copy(alpha = 0.22f), // Beautiful semi-translucent large overlay
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

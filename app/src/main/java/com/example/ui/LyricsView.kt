@@ -36,6 +36,12 @@ fun LyricsView(
     val lazyListState = rememberLazyListState()
     val density = androidx.compose.ui.platform.LocalDensity.current
 
+    val animatedActiveIndex by animateFloatAsState(
+        targetValue = activeIndex.toFloat(),
+        animationSpec = tween(durationMillis = 280),
+        label = "animated_active_index"
+    )
+
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
@@ -137,28 +143,9 @@ fun LyricsView(
                     }
                 }
                 
-                // Animate properties for smooth focus transitions
-                val scale by animateFloatAsState(
-                    targetValue = if (isActive) 1.12f else 0.94f,
-                    animationSpec = tween(durationMillis = 250),
-                    label = "scale"
-                )
-                
-                val opacity by animateFloatAsState(
-                    targetValue = if (isActive) 1.0f else 0.50f, // 50% opacity for previous/next lyrics
-                    animationSpec = tween(durationMillis = 250),
-                    label = "opacity"
-                )
-
-                val textColor by animateColorAsState(
-                    targetValue = if (isActive) Color.White else Color.White, // Always base of pure white
-                    animationSpec = tween(durationMillis = 250),
-                    label = "text_color"
-                )
-
                 Text(
                     text = line.text,
-                    color = textColor,
+                    color = Color.White,
                     fontSize = baseFontSize.sp,
                     fontWeight = if (isActive) FontWeight.ExtraBold else FontWeight.Medium, // Modern font hierarchy
                     textAlign = TextAlign.Center,
@@ -167,10 +154,14 @@ fun LyricsView(
                         .fillMaxWidth()
                         .padding(horizontal = 40.dp)
                         .graphicsLayer {
-                            // Hardware-accelerated scaling and opacity fading completely bypass composition and layout!
-                            scaleX = scale
-                            scaleY = scale
-                            this.alpha = opacity
+                            // Hardware-accelerated scaling and opacity fading based on distance to animated index
+                            val diff = kotlin.math.abs(index.toFloat() - animatedActiveIndex)
+                            val scaleVal = (1.12f - (diff * 0.18f)).coerceAtLeast(0.94f)
+                            val opacityVal = (1.0f - (diff * 0.50f)).coerceAtLeast(0.35f)
+                            
+                            scaleX = scaleVal
+                            scaleY = scaleVal
+                            this.alpha = opacityVal
                         }
                         .clickable(
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },

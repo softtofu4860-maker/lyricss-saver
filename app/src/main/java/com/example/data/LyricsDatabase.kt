@@ -5,13 +5,17 @@ import androidx.room.*
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.flow.Flow
 
 data class LyricLine(
     val timeSec: Float,
     val text: String
 )
 
-@Entity(tableName = "cached_lyrics")
+@Entity(
+    tableName = "cached_lyrics",
+    indices = [Index(value = ["timestamp"])]
+)
 data class CachedLyrics(
     @PrimaryKey val id: String, // key: "artist_title" in lowercase without special chars
     val title: String,
@@ -64,6 +68,9 @@ interface LyricsDao {
     @Query("SELECT * FROM cached_lyrics WHERE id = :id LIMIT 1")
     suspend fun getLyricsById(id: String): CachedLyrics?
 
+    @Query("SELECT * FROM cached_lyrics ORDER BY timestamp DESC")
+    fun getAllCachedLyrics(): Flow<List<CachedLyrics>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLyrics(lyrics: CachedLyrics)
 
@@ -74,7 +81,7 @@ interface LyricsDao {
     suspend fun clearAll()
 }
 
-@Database(entities = [CachedLyrics::class], version = 1, exportSchema = false)
+@Database(entities = [CachedLyrics::class], version = 2, exportSchema = false)
 @TypeConverters(LyricsConverters::class)
 abstract class LyricsDatabase : RoomDatabase() {
     abstract fun lyricsDao(): LyricsDao

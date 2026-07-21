@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -74,6 +75,7 @@ fun MainScreen(
     val context = LocalContext.current
     val mediaState by viewModel.mediaState.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
+    val savedLyrics by viewModel.savedLyrics.collectAsStateWithLifecycle()
 
     var isPermissionEnabled by remember {
         mutableStateOf(MusicNotificationListener.isNotificationServiceEnabled(context))
@@ -167,6 +169,9 @@ fun MainScreen(
                     DashboardScreen(
                         mediaState = mediaState,
                         lyricsState = lyricsState,
+                        savedLyrics = savedLyrics,
+                        onDeleteSavedSong = { viewModel.deleteSavedSong(it) },
+                        onSelectSavedSong = { viewModel.loadLyricsFromLibrary(it) },
                         selectedMode = selectedVisualizerMode,
                         onModeSelected = { selectedVisualizerMode = it },
                         onLaunchScreensaver = { screensaverActive = true },
@@ -219,7 +224,7 @@ fun PermissionOnboardingScreen(
         ) {
             Icon(
                 imageVector = Icons.Rounded.Audiotrack,
-                contentDescription = "App Logo",
+                contentDescription = "앱 로고",
                 tint = Color.White.copy(alpha = 0.85f),
                 modifier = Modifier.size(36.dp)
             )
@@ -352,6 +357,9 @@ fun PermissionFeatureRow(
 fun DashboardScreen(
     mediaState: com.example.service.MediaState,
     lyricsState: LyricsUiState,
+    savedLyrics: List<com.example.data.CachedLyrics>,
+    onDeleteSavedSong: (String) -> Unit,
+    onSelectSavedSong: (com.example.data.CachedLyrics) -> Unit,
     selectedMode: VisualizerMode,
     onModeSelected: (VisualizerMode) -> Unit,
     onLaunchScreensaver: () -> Unit,
@@ -365,6 +373,7 @@ fun DashboardScreen(
     var userApiKey by remember { mutableStateOf(sharedPrefs.getString("gemini_api_key", "") ?: "") }
     var showKeyDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var selectedDetailSong by remember { mutableStateOf<com.example.data.CachedLyrics?>(null) }
 
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -382,7 +391,7 @@ fun DashboardScreen(
         ) {
             Column {
                 Text(
-                    text = "SMART SCREENSAVER",
+                    text = "스마트 화면보호기",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color.White.copy(alpha = 0.8f),
@@ -404,7 +413,7 @@ fun DashboardScreen(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.DeleteSweep,
-                    contentDescription = "Clear Cache",
+                    contentDescription = "캐시 비우기",
                     tint = Color.White.copy(alpha = 0.8f)
                 )
             }
@@ -991,6 +1000,174 @@ fun DashboardScreen(
         }
     }
 
+    // 4.5 Saved Lyrics Library Card
+    val savedLyricsLibraryContent = @Composable {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF131318)),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.LibraryMusic,
+                            contentDescription = null,
+                            tint = Color(0xFF00FFFF),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "내 저장 가사 보관함",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                    Text(
+                        text = "${savedLyrics.size}곡 저장됨",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (savedLyrics.isEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.15f),
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = "아직 저장된 가사가 없습니다.",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.4f),
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "음악을 들으며 번역하거나 가사를 편집하면\n이곳 보관함에 자동으로 기록됩니다.",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.3f),
+                            textAlign = TextAlign.Center,
+                            lineHeight = 15.sp
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 240.dp)
+                    ) {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(savedLyrics) { song ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.White.copy(alpha = 0.03f), shape = RoundedCornerShape(10.dp))
+                                        .clickable { selectedDetailSong = song }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.MusicNote,
+                                            contentDescription = null,
+                                            tint = Color.White.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = song.title,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = song.artist,
+                                                    fontSize = 11.sp,
+                                                    color = Color.White.copy(alpha = 0.5f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (!song.genre.isNullOrEmpty()) {
+                                                    Text(
+                                                        text = "•",
+                                                        fontSize = 11.sp,
+                                                        color = Color.White.copy(alpha = 0.3f)
+                                                    )
+                                                    Text(
+                                                        text = song.genre,
+                                                        fontSize = 10.sp,
+                                                        color = Color(0xFF4ADE80),
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier
+                                                            .background(Color(0xFF4ADE80).copy(alpha = 0.1f), shape = RoundedCornerShape(3.dp))
+                                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        IconButton(
+                                            onClick = { onDeleteSavedSong(song.id) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Delete,
+                                                contentDescription = "삭제",
+                                                tint = Color(0xFFFF453A).copy(alpha = 0.7f),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 6. Massive launch button
     val launchButtonContent = @Composable {
         Button(
@@ -1026,57 +1203,107 @@ fun DashboardScreen(
         }
     }
 
-    if (useTwoColumnLayout) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (useTwoColumnLayout) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalArrangement = Arrangement.spacedBy(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1.1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    headerContent()
+                    Spacer(modifier = Modifier.height(4.dp))
+                    playerCardContent()
+                    Spacer(modifier = Modifier.height(4.dp))
+                    visualizerSelectorContent()
+                }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    lyricsCacheContent()
+                    savedLyricsLibraryContent()
+                    apiKeySettingContent()
+                    systemDreamContent()
+                    Spacer(modifier = Modifier.weight(1f))
+                    launchButtonContent()
+                }
+            }
+        } else {
             Column(
                 modifier = Modifier
-                    .weight(1.1f)
-                    .fillMaxHeight()
+                    .fillMaxSize()
+                    .padding(24.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 headerContent()
-                Spacer(modifier = Modifier.height(4.dp))
                 playerCardContent()
-                Spacer(modifier = Modifier.height(4.dp))
                 visualizerSelectorContent()
-            }
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
                 lyricsCacheContent()
+                savedLyricsLibraryContent()
                 apiKeySettingContent()
                 systemDreamContent()
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.height(16.dp))
                 launchButtonContent()
             }
         }
-    } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+
+        // Sidebar Backdrop Dim Overlay
+        AnimatedVisibility(
+            visible = selectedDetailSong != null,
+            enter = fadeIn(),
+            exit = fadeOut()
         ) {
-            headerContent()
-            playerCardContent()
-            visualizerSelectorContent()
-            lyricsCacheContent()
-            apiKeySettingContent()
-            systemDreamContent()
-            Spacer(modifier = Modifier.height(16.dp))
-            launchButtonContent()
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { selectedDetailSong = null }
+            )
+        }
+
+        // Sidebar Sliding Sheet
+        AnimatedVisibility(
+            visible = selectedDetailSong != null,
+            enter = slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = spring(stiffness = Spring.StiffnessLow)
+            ),
+            exit = slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = spring(stiffness = Spring.StiffnessLow)
+            ),
+            modifier = Modifier.align(Alignment.CenterEnd)
+        ) {
+            selectedDetailSong?.let { song ->
+                SidebarLyricsDetailView(
+                    song = song,
+                    onClose = { selectedDetailSong = null },
+                    onPlay = {
+                        onSelectSavedSong(song)
+                        selectedDetailSong = null
+                    },
+                    onDelete = {
+                        onDeleteSavedSong(song.id)
+                        selectedDetailSong = null
+                    }
+                )
+            }
         }
     }
 }
@@ -1604,7 +1831,7 @@ fun ImmersiveScreensaverView(
                             if (mediaState.albumArt != null) {
                                 Image(
                                     bitmap = mediaState.albumArt.asImageBitmap(),
-                                    contentDescription = "Album Artwork",
+                                    contentDescription = "앨범 아트워크",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -1621,7 +1848,7 @@ fun ImmersiveScreensaverView(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Audiotrack,
-                                        contentDescription = "No Artwork",
+                                        contentDescription = "아트워크 없음",
                                         tint = Color.White.copy(alpha = 0.6f),
                                         modifier = Modifier.size(80.dp)
                                     )
@@ -1787,7 +2014,7 @@ fun ImmersiveScreensaverView(
                             if (mediaState.albumArt != null) {
                                 Image(
                                     bitmap = mediaState.albumArt.asImageBitmap(),
-                                    contentDescription = "Album Artwork",
+                                    contentDescription = "앨범 아트워크",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -1804,7 +2031,7 @@ fun ImmersiveScreensaverView(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Audiotrack,
-                                        contentDescription = "No Artwork",
+                                        contentDescription = "아트워크 없음",
                                         tint = Color.White.copy(alpha = 0.6f),
                                         modifier = Modifier.size(64.dp)
                                     )
@@ -1940,7 +2167,7 @@ fun ImmersiveScreensaverView(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.BatteryStd,
-                                contentDescription = "Battery Status",
+                                contentDescription = "배터리 상태",
                                 tint = Color.White.copy(alpha = 0.8f),
                                 modifier = Modifier.size(13.dp)
                             )
@@ -1991,7 +2218,7 @@ fun ImmersiveScreensaverView(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.NightsStay,
-                                    contentDescription = "Night Mode Active",
+                                    contentDescription = "야간 모드 활성화됨",
                                     tint = Color(0xFFFEF08A),
                                     modifier = Modifier.size(10.dp)
                                 )
@@ -2062,7 +2289,7 @@ fun ImmersiveScreensaverView(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
-                            contentDescription = "Exit Screensaver",
+                            contentDescription = "화면보호기 종료",
                             tint = Color.White,
                             modifier = Modifier.size(18.dp)
                         )
@@ -2096,6 +2323,7 @@ fun WavySlider(
             }
         }
     }
+    val cachedPath = remember { Path() }
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
@@ -2140,10 +2368,11 @@ fun WavySlider(
 
             // 2. Wavy Active track
             if (activeWidth > 0f) {
-                val path = Path()
+                val path = cachedPath
+                path.reset()
                 path.moveTo(0f, centerY)
 
-                val stepPx = 4.dp.toPx()
+                val stepPx = 12.dp.toPx() // Increased from 4.dp to 12.dp to reduce loop cycles by 3x!
                 val segmentCount = (activeWidth / stepPx).toInt().coerceAtLeast(10)
                 val baseAmplitude = 3.dp.toPx()
                 val frequency = 0.05f
@@ -2280,7 +2509,7 @@ fun PersistentControlsCard(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Shuffle,
-                    contentDescription = "Shuffle",
+                    contentDescription = "셔플",
                     tint = if (isShuffle) primaryColor else Color.White.copy(alpha = 0.5f),
                     modifier = Modifier.size(18.dp)
                 )
@@ -2299,7 +2528,7 @@ fun PersistentControlsCard(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.SkipPrevious,
-                    contentDescription = "Previous Song",
+                    contentDescription = "이전 곡",
                     tint = Color.White,
                     modifier = Modifier.size(22.dp)
                 )
@@ -2329,7 +2558,7 @@ fun PersistentControlsCard(
             ) {
                 Icon(
                     imageVector = if (mediaState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = "Play or Pause",
+                    contentDescription = "재생 또는 일시정지",
                     tint = Color.White,
                     modifier = Modifier.size(28.dp)
                 )
@@ -2348,7 +2577,7 @@ fun PersistentControlsCard(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.SkipNext,
-                    contentDescription = "Next Song",
+                    contentDescription = "다음 곡",
                     tint = Color.White,
                     modifier = Modifier.size(22.dp)
                 )
@@ -2368,7 +2597,7 @@ fun PersistentControlsCard(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Repeat,
-                    contentDescription = "Repeat Mode",
+                    contentDescription = "반복 모드",
                     tint = if (isRepeat) primaryColor else Color.White.copy(alpha = 0.5f),
                     modifier = Modifier.size(18.dp)
                 )
@@ -2404,7 +2633,7 @@ fun PersistentControlsCard(
             ) {
                 Icon(
                     imageVector = volumeIcon,
-                    contentDescription = "System Volume",
+                    contentDescription = "시스템 볼륨",
                     tint = primaryColor,
                     modifier = Modifier.size(16.dp)
                 )
@@ -2455,7 +2684,7 @@ fun PersistentControlsCard(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Timer,
-                    contentDescription = "Sync Adjustment",
+                    contentDescription = "가사 싱크 조절",
                     tint = Color.White.copy(alpha = 0.8f),
                     modifier = Modifier.size(15.dp)
                 )
@@ -2533,7 +2762,7 @@ fun PersistentControlsCard(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Refresh,
-                        contentDescription = "Reset Sync",
+                        contentDescription = "싱크 초기화",
                         tint = if (hasOffset) Color.White else Color.White.copy(alpha = 0.4f),
                         modifier = Modifier.size(13.dp)
                     )
@@ -2569,12 +2798,12 @@ fun parseSongBookmarks(lines: List<com.example.data.LyricLine>, durationMs: Long
     
     // Fallback if no sections are found in the text
     if (list.isEmpty() && durationMs > 0) {
-        list.add(SongBookmark("Intro", 0L))
-        list.add(SongBookmark("Verse 1", (durationMs * 0.15f).toLong()))
-        list.add(SongBookmark("Chorus 1", (durationMs * 0.38f).toLong()))
-        list.add(SongBookmark("Verse 2", (durationMs * 0.58f).toLong()))
-        list.add(SongBookmark("Chorus 2", (durationMs * 0.78f).toLong()))
-        list.add(SongBookmark("Outro", (durationMs * 0.90f).toLong()))
+        list.add(SongBookmark("전주", 0L))
+        list.add(SongBookmark("1절", (durationMs * 0.15f).toLong()))
+        list.add(SongBookmark("후렴 1", (durationMs * 0.38f).toLong()))
+        list.add(SongBookmark("2절", (durationMs * 0.58f).toLong()))
+        list.add(SongBookmark("후렴 2", (durationMs * 0.78f).toLong()))
+        list.add(SongBookmark("후주", (durationMs * 0.90f).toLong()))
     }
     return list.sortedBy { it.timeMs }.take(6)
 }
@@ -2633,7 +2862,7 @@ fun getAppFriendlyName(packageName: String?): String {
         packageName.contains("genie") -> "Genie Music"
         packageName.contains("youtube.music") -> "YouTube Music"
         packageName.contains("youtube") -> "YouTube"
-        packageName.contains("music") -> "Music Player"
+        packageName.contains("music") -> "일반 음악 앱"
         else -> packageName.substringAfterLast(".").replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
     }
 }
@@ -3215,4 +3444,343 @@ fun LyricsCorrectionDialog(
         },
         containerColor = Color(0xFF141430)
     )
+}
+
+@Composable
+fun SidebarLyricsDetailView(
+    song: com.example.data.CachedLyrics,
+    onClose: () -> Unit,
+    onPlay: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val sidebarWidth = if (screenWidth > 500.dp) 420.dp else screenWidth * 0.88f
+
+    val moshi = remember {
+        com.squareup.moshi.Moshi.Builder()
+            .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+            .build()
+    }
+
+    // Parse lyric lines
+    val parsedLines = remember(song) {
+        try {
+            val typeLines = com.squareup.moshi.Types.newParameterizedType(List::class.java, LyricLine::class.java)
+            val linesAdapter = moshi.adapter<List<LyricLine>>(typeLines)
+            linesAdapter.fromJson(song.lyricsJson) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(sidebarWidth)
+            .shadow(24.dp, shape = RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
+            .border(
+                1.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.08f),
+                        Color.White.copy(alpha = 0.02f)
+                    )
+                ),
+                shape = RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp)
+            ),
+        color = Color(0xFF0D0D14),
+        shape = RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(vertical = 20.dp, horizontal = 18.dp)
+        ) {
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.LibraryMusic,
+                        contentDescription = null,
+                        tint = Color(0xFF00FFFF),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "저장된 가사 상세",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Color.White.copy(alpha = 0.05f), shape = CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "닫기",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Metadata card (Title, Artist, Genre, BPM)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.02f)),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.04f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(Color(0xFF00FFFF).copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = Color(0xFF00FFFF),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = song.title,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = song.artist,
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.6f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Genre badge
+                        if (!song.genre.isNullOrEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(Color(0xFF00FFFF).copy(alpha = 0.1f), shape = RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Style,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00FFFF),
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = song.genre,
+                                    fontSize = 10.sp,
+                                    color = Color(0xFF00FFFF),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // BPM Badge
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(Color(0xFFFF8C00).copy(alpha = 0.1f), shape = RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Speed,
+                                contentDescription = null,
+                                tint = Color(0xFFFF8C00),
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "${song.bpm} BPM",
+                                fontSize = 10.sp,
+                                color = Color(0xFFFF8C00),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Lyrics Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "가사 및 싱크 정보",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White.copy(alpha = 0.4f),
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "${parsedLines.size} 소절",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Lyrics List
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.01f), shape = RoundedCornerShape(12.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.02f), shape = RoundedCornerShape(12.dp))
+                    .padding(8.dp)
+            ) {
+                if (parsedLines.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "가사 데이터가 없습니다.",
+                            color = Color.White.copy(alpha = 0.3f),
+                            fontSize = 12.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(8.dp)
+                    ) {
+                        items(parsedLines) { line ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                // Format timeSec as [mm:ss]
+                                val min = (line.timeSec / 60).toInt()
+                                val sec = (line.timeSec % 60).toInt()
+                                val timeStr = java.util.Locale.US.let { locale ->
+                                    String.format(locale, "%02d:%02d", min, sec)
+                                }
+
+                                Text(
+                                    text = "[$timeStr]",
+                                    color = Color(0xFF00FFFF).copy(alpha = 0.7f),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 1.dp)
+                                )
+
+                                Text(
+                                    text = line.text,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Actions Block
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Button(
+                    onClick = onPlay,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "이 곡 재생 및 화면보호기 연동",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Button(
+                    onClick = onDelete,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF271B1B),
+                        contentColor = Color(0xFFFF453A)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = null,
+                        tint = Color(0xFFFF453A),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "이 곡 삭제",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
 }

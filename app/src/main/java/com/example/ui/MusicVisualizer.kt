@@ -225,7 +225,7 @@ private fun DrawScope.drawLiquidWaves(
 
         path.moveTo(0f, waveBaseY)
 
-        for (x in 0..width.toInt() step 6) {
+        for (x in 0..width.toInt() step 18) {
             val radians = x * frequency + wavePhase
             val y = waveBaseY + sin(radians) * amplitude + cos(radians * 0.4f) * (amplitude * 0.25f)
             path.lineTo(x.toFloat(), y)

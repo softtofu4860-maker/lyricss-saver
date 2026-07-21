@@ -215,6 +215,43 @@ object GeminiLyricsService {
         }
     }
 
+    /**
+     * Fetch lyrics directly from LRCLIB using the direct matching endpoint (/api/get).
+     * This is extremely fast and accurate as it matches track metadata (title, artist, duration) in real-time.
+     */
+    suspend fun fetchLrclibDirect(title: String, artist: String, durationSec: Long = 0): String? = withContext(Dispatchers.IO) {
+        try {
+            val encodedArtist = URLEncoder.encode(artist, "UTF-8")
+            val encodedTitle = URLEncoder.encode(title, "UTF-8")
+            var url = "https://lrclib.net/api/get?artist_name=$encodedArtist&track_name=$encodedTitle"
+            if (durationSec > 0) {
+                url += "&duration=$durationSec"
+            }
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "MusicScreensaver (https://github.com/example/MusicScreensaver)")
+                .get()
+                .build()
+
+            val response = executeCallWithRetry(request)
+            if (response.isSuccessful) {
+                val responseBodyStr = response.body?.string() ?: ""
+                val adapter = moshi.adapter(LrclibResponse::class.java)
+                val responseRaw = adapter.fromJson(responseBodyStr)
+                val raw = responseRaw?.syncedLyrics ?: responseRaw?.plainLyrics
+                if (!raw.isNullOrEmpty()) {
+                    Log.d(TAG, "Successfully fetched lyrics directly from LRCLIB get API for: $title")
+                    return@withContext raw
+                }
+            } else {
+                Log.w(TAG, "LRCLIB get API returned HTTP ${response.code} for: $title")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching from LRCLIB direct get API", e)
+        }
+        return@withContext null
+    }
+
     suspend fun searchLrclib(query: String): List<LrclibResponse> = withContext(Dispatchers.IO) {
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -525,6 +562,19 @@ object GeminiLyricsService {
         val database = LyricsDatabase.getDatabase(context)
         val dao = database.lyricsDao()
 
+        // Instant cache hit path: check local database cache first if not performing custom search query
+        if (customQuery.isNullOrEmpty()) {
+            val cached = dao.getLyricsById(songId)
+            if (cached != null) {
+                if (isFallbackLyrics(cached)) {
+                    Log.d(TAG, "Cached lyrics for '$title' are fallback/placeholder. Bypassing cache to attempt real fetch...")
+                } else {
+                    Log.d(TAG, "Loaded lyrics from database cache for song: $title (Instant cache hit)")
+                    return@withContext cached
+                }
+            }
+        }
+
         if (!customQuery.isNullOrEmpty()) {
             // Re-search/Custom Query path: Evict cache first
             Log.d(TAG, "Custom search/correction requested. Evicting old cache for: $title")
@@ -588,11 +638,24 @@ object GeminiLyricsService {
         } else {
             // Standard/automatic path
             // 1. MUST SEARCH LRCLIB & lrcmux FIRST (High Quality Synced Online DBs)
-            Log.d(TAG, "Searching online databases (LRCLIB search + lrcmux) first for: $title")
+            Log.d(TAG, "Searching online databases (LRCLIB direct + search + lrcmux) first for: $title")
             val durationSec = if (durationMs > 0) durationMs / 1000L else 0L
             val (onlineSource, onlineRawLyrics) = coroutineScope {
-                // LRCLIB: use /api/search?q=... then pick best match by title+artist similarity
-                val lrclibDeferred = async {
+                // 1. Try direct LRCLIB match (extremely fast and accurate!)
+                val lrclibDirectDeferred = async {
+                    try {
+                        val directRaw = fetchLrclibDirect(title, artist, durationSec)
+                        if (!directRaw.isNullOrEmpty()) {
+                            return@async Pair("LRCLIB API (Direct)", directRaw)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error fetching from LRCLIB direct matching in parallel", e)
+                    }
+                    null
+                }
+
+                // 2. LRCLIB: use /api/search?q=... then pick best match by title+artist similarity
+                val lrclibSearchDeferred = async {
                     try {
                         val query = "$title $artist"
                         val searchResults = searchLrclib(query)
@@ -600,7 +663,7 @@ object GeminiLyricsService {
                         val raw = best?.syncedLyrics ?: best?.plainLyrics
                         if (!raw.isNullOrEmpty()) {
                             Log.d(TAG, "Successfully fetched lyrics from LRCLIB search for: $title")
-                            return@async Pair("LRCLIB API", raw)
+                            return@async Pair("LRCLIB API (Search)", raw)
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Error searching LRCLIB in parallel", e)
@@ -608,7 +671,7 @@ object GeminiLyricsService {
                     null
                 }
 
-                // lrcmux: free aggregator (Genius, Kugou, Musixmatch, NetEase, YouTube Music)
+                // 3. lrcmux: free aggregator (Genius, Kugou, Musixmatch, NetEase, YouTube Music)
                 val lrcmuxDeferred = async {
                     try {
                         Log.d(TAG, "Trying lrcmux aggregator for: $title")
@@ -623,10 +686,11 @@ object GeminiLyricsService {
                     null
                 }
 
-                val lrclibRes = lrclibDeferred.await()
+                val directRes = lrclibDirectDeferred.await()
                 val lrcmuxRes = lrcmuxDeferred.await()
+                val searchRes = lrclibSearchDeferred.await()
 
-                lrclibRes ?: lrcmuxRes ?: Pair<String?, String?>(null, null)
+                directRes ?: lrcmuxRes ?: searchRes ?: Pair<String?, String?>(null, null)
             }
 
             if (!onlineRawLyrics.isNullOrEmpty() && !onlineSource.isNullOrEmpty()) {

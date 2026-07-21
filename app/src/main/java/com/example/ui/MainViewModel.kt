@@ -36,6 +36,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val mediaState = MediaStateHolder.mediaState
 
+    val savedLyrics: StateFlow<List<CachedLyrics>> = repository.getAllSavedLyrics()
+        .map { list ->
+            list.filter { !com.example.api.GeminiLyricsService.isFallbackLyrics(it) }
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     private var lastLoadedSongKey = ""
     private var lastMetadataLyrics: String? = null
 
@@ -143,6 +153,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 loadLyrics(current.title, current.artist, current.lyrics, current.durationMs)
             } else {
                 _lyricsState.value = LyricsUiState.Empty
+            }
+        }
+    }
+
+    fun deleteSavedSong(songId: String) {
+        viewModelScope.launch {
+            repository.deleteLyrics(songId)
+        }
+    }
+
+    fun loadLyricsFromLibrary(cachedLyrics: CachedLyrics) {
+        viewModelScope.launch {
+            _lyricsState.value = LyricsUiState.Loading
+            try {
+                // Parse lines JSON
+                val typeLines = Types.newParameterizedType(List::class.java, LyricLine::class.java)
+                val linesAdapter = moshi.adapter<List<LyricLine>>(typeLines)
+                val lines = linesAdapter.fromJson(cachedLyrics.lyricsJson) ?: emptyList()
+
+                // Parse colors JSON
+                val typeColors = Types.newParameterizedType(List::class.java, String::class.java)
+                val colorsAdapter = moshi.adapter<List<String>>(typeColors)
+                val colors = colorsAdapter.fromJson(cachedLyrics.hexColorsJson) ?: listOf("#00FFFF", "#8A2BE2")
+
+                _lyricsState.value = LyricsUiState.Success(cachedLyrics, lines, colors)
+                
+                // Update mediaState so the player card matches this selected song!
+                com.example.service.MediaStateHolder.updateState(
+                    title = cachedLyrics.title,
+                    artist = cachedLyrics.artist,
+                    album = "저장된 라이브러리",
+                    isPlaying = false,
+                    positionMs = 0L,
+                    durationMs = if (lines.isNotEmpty()) (lines.last().timeSec * 1000).toLong() + 5000L else 180000L,
+                    packageName = "com.example.library", // Indicate loaded from library
+                    lyrics = null
+                )
+            } catch (e: Exception) {
+                Log.e(tag, "Error loading lyrics from library", e)
+                _lyricsState.value = LyricsUiState.Error("Error: ${e.message}")
             }
         }
     }

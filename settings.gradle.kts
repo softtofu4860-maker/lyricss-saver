@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Smart Music Screensaver"
+rootProject.name = "스마트 음악 화면보호기"
 
 include(":app")

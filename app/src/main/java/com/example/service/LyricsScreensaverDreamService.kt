@@ -56,6 +56,15 @@ class LyricsScreensaverDreamService : DreamService() {
         isInteractive = true
         isFullscreen = true
         
+        // Automatically lower screen brightness in screensaver mode to save battery and prevent OLED burn-in
+        try {
+            window?.attributes = window?.attributes?.apply {
+                screenBrightness = 0.20f // Low brightness (20%) for screensaver mode
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to set screen brightness", e)
+        }
+        
         lifecycleOwner.onStart()
         lifecycleOwner.onResume()
 

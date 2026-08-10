@@ -43,10 +43,13 @@ class LyricsScreensaverDreamService : DreamService() {
     private val savedStateRegistryOwner = SimpleSavedStateRegistryOwner(lifecycleOwner)
     private val viewModelStoreOwner = SimpleViewModelStoreOwner()
 
+    private val spotifyReceiver = SpotifyBroadcastReceiver()
+
     override fun onCreate() {
         super.onCreate()
         repository = LyricsRepository(applicationContext)
         lifecycleOwner.onCreate()
+        SpotifyBroadcastReceiver.register(this, spotifyReceiver)
     }
 
     override fun onAttachedToWindow() {
@@ -99,6 +102,7 @@ class LyricsScreensaverDreamService : DreamService() {
         lifecycleOwner.onDestroy()
         viewModelStoreOwner.clear()
         serviceScope.cancel()
+        SpotifyBroadcastReceiver.unregister(this, spotifyReceiver)
         super.onDestroy()
     }
 

@@ -63,14 +63,9 @@ android {
 // to match the convention used in Web projects.
 val envFile = rootProject.file(".env")
 if (!envFile.exists()) {
-  val envContent = StringBuilder()
-  val geminiKey = System.getenv("GEMINI_API_KEY")
-  if (geminiKey != null) {
-    envContent.append("GEMINI_API_KEY=$geminiKey\n")
-  }
-  if (envContent.isNotEmpty()) {
-    envFile.writeText(envContent.toString())
-  }
+  val geminiKey = System.getenv("GEMINI_API_KEY") ?: ""
+  val finalKey = if (geminiKey.isNotBlank()) geminiKey else "MY_GEMINI_API_KEY"
+  envFile.writeText("GEMINI_API_KEY=$finalKey\n")
 }
 
 secrets {

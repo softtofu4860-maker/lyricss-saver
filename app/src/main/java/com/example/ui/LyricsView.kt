@@ -31,7 +31,8 @@ fun LyricsView(
     activeColor: Color,
     onLineClicked: (Long) -> Unit, // Allows the user to tap on any line to seek directly to that lyric in the song!
     onBackgroundClicked: () -> Unit, // Toggles playback controls when clicking empty spaces
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fontScale: Float = 1.0f
 ) {
     val lazyListState = rememberLazyListState()
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -130,16 +131,17 @@ fun LyricsView(
                 val isActive = index == activeIndex
                 
                 // Calculate responsive static base size based on text length to fit screen width
-                val baseFontSize = remember(line.text, maxWidthDp) {
+                val baseFontSize = remember(line.text, maxWidthDp, fontScale) {
                     val availableWidthDp = (maxWidthDp - 80f).coerceAtLeast(180f)
-                    val charWidthDp = 18f * 0.48f // Roughly 48% of base font size
+                    val rawSize = 18f * fontScale
+                    val charWidthDp = rawSize * 0.48f // Roughly 48% of base font size
                     val maxComfortableChars = (availableWidthDp / charWidthDp).coerceAtLeast(15f)
                     val length = line.text.length.coerceAtLeast(1)
                     if (length > maxComfortableChars) {
                         val scale = (maxComfortableChars / length.toFloat()).coerceIn(0.7f, 1.0f)
-                        18f * scale
+                        rawSize * scale
                     } else {
-                        18f
+                        rawSize
                     }
                 }
                 
@@ -224,7 +226,8 @@ fun MinimalLyricsView(
     activeColor: Color,
     onLineClicked: (Long) -> Unit,
     onBackgroundClicked: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fontScale: Float = 1.0f
 ) {
     val lazyListState = rememberLazyListState()
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -341,11 +344,12 @@ fun MinimalLyricsView(
                         }
                 ) {
                     subLines.forEachIndexed { subIndex, subLineText ->
-                        val fontSize = when (subIndex) {
-                            0 -> if (isActive) 21.sp else 18.sp
-                            1 -> if (isActive) 14.sp else 12.sp
-                            else -> if (isActive) 16.sp else 14.sp
+                        val basePx = when (subIndex) {
+                            0 -> if (isActive) 21f else 18f
+                            1 -> if (isActive) 14f else 12f
+                            else -> if (isActive) 16f else 14f
                         }
+                        val fontSize = (basePx * fontScale).sp
                         val fontWeight = when (subIndex) {
                             0 -> if (isActive) FontWeight.ExtraBold else FontWeight.Medium
                             1 -> FontWeight.Normal

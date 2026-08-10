@@ -29,14 +29,14 @@ import kotlin.math.abs
 @JsonClass(generateAdapter = true)
 data class GeminiRequest(
     val contents: List<GeminiContent>,
-    @Json(name = "generation_config") val generationConfig: GeminiConfig? = null,
-    @Json(name = "system_instruction") val systemInstruction: GeminiContent? = null,
+    @field:Json(name = "generation_config") val generationConfig: GeminiConfig? = null,
+    @field:Json(name = "system_instruction") val systemInstruction: GeminiContent? = null,
     val tools: List<GeminiTool>? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class GeminiTool(
-    @Json(name = "google_search") val googleSearch: Map<String, String>? = null
+    @field:Json(name = "google_search") val googleSearch: Map<String, String>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -51,7 +51,7 @@ data class GeminiPart(
 
 @JsonClass(generateAdapter = true)
 data class GeminiConfig(
-    @Json(name = "response_mime_type") val responseMimeType: String? = "application/json",
+    @field:Json(name = "response_mime_type") val responseMimeType: String? = "application/json",
     val temperature: Float? = 0.5f
 )
 

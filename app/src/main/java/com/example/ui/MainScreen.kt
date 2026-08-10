@@ -556,6 +556,98 @@ fun DashboardScreen(
         }
     }
 
+    // 2.5 Battery & System Real-time Status Card
+    var dashBatteryLevel by remember { mutableStateOf(100) }
+    var dashIsCharging by remember { mutableStateOf(false) }
+    DisposableEffect(context) {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
+                if (intent.action == android.content.Intent.ACTION_BATTERY_CHANGED) {
+                    val level = intent.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+                    val scale = intent.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1)
+                    if (level != -1 && scale != -1) {
+                        dashBatteryLevel = (level * 100 / scale.toFloat()).toInt()
+                    }
+                    val status = intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
+                    dashIsCharging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                            status == android.os.BatteryManager.BATTERY_STATUS_FULL
+                }
+            }
+        }
+        val filter = android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, filter)
+        }
+        onDispose {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (e: Exception) {}
+        }
+    }
+
+    val systemBatteryCardContent = @Composable {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF131318)),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (dashIsCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryStd,
+                            contentDescription = null,
+                            tint = if (dashIsCharging) Color(0xFF4ADE80) else Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "실시간 배터리 및 터치 모니터",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = if (dashIsCharging) Color(0xFF4ADE80).copy(alpha = 0.15f) else Color.White.copy(alpha = 0.08f),
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = if (dashIsCharging) "$dashBatteryLevel% (충전 중 ⚡)" else "$dashBatteryLevel%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (dashIsCharging) Color(0xFF4ADE80) else Color.White.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "• 화면보호기 실행 시 OLED 번인 방지 및 실시간 저전력 모니터링 연동\n• 가사 터치 탐색 활성화: 가사 구절 클릭 시 해당 타임스탬프로 즉시 재생 이동",
+                    fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.5f),
+                    lineHeight = 16.sp
+                )
+            }
+        }
+    }
+
     // 3. Quick Selector for visualizer mode
     val visualizerSelectorContent = @Composable {
         Column(
@@ -1221,6 +1313,7 @@ fun DashboardScreen(
                     headerContent()
                     Spacer(modifier = Modifier.height(4.dp))
                     playerCardContent()
+                    systemBatteryCardContent()
                     Spacer(modifier = Modifier.height(4.dp))
                     visualizerSelectorContent()
                 }
@@ -1250,6 +1343,7 @@ fun DashboardScreen(
             ) {
                 headerContent()
                 playerCardContent()
+                systemBatteryCardContent()
                 visualizerSelectorContent()
                 lyricsCacheContent()
                 savedLyricsLibraryContent()
@@ -1617,8 +1711,9 @@ fun ImmersiveScreensaverView(
         }
     }
 
-    // Event-driven battery listener: consumes 0% CPU compared to continuous polling!
+    // Event-driven battery listener with charging status detection
     var batteryLevel by remember { mutableStateOf(100) }
+    var isCharging by remember { mutableStateOf(false) }
     DisposableEffect(context) {
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
@@ -1628,6 +1723,9 @@ fun ImmersiveScreensaverView(
                     if (level != -1 && scale != -1) {
                         batteryLevel = (level * 100 / scale.toFloat()).toInt()
                     }
+                    val status = intent.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
+                    isCharging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+                            status == android.os.BatteryManager.BATTERY_STATUS_FULL
                 }
             }
         }
@@ -1651,6 +1749,9 @@ fun ImmersiveScreensaverView(
     val sharedPrefs = context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE)
     var isControlsPinned by remember {
         mutableStateOf(sharedPrefs.getBoolean("controls_pinned", true))
+    }
+    var lyricFontScale by remember {
+        mutableStateOf(sharedPrefs.getFloat("lyric_font_scale", 1.0f))
     }
     var currentTheme by remember {
         mutableStateOf(
@@ -1876,7 +1977,8 @@ fun ImmersiveScreensaverView(
                                             showControls = !showControls
                                             lastInteractionTime = System.currentTimeMillis()
                                         },
-                                        modifier = Modifier.fillMaxSize()
+                                        modifier = Modifier.fillMaxSize(),
+                                        fontScale = lyricFontScale
                                     )
                                 } else {
                                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1930,7 +2032,8 @@ fun ImmersiveScreensaverView(
                                         showControls = !showControls
                                         lastInteractionTime = System.currentTimeMillis()
                                     },
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier.fillMaxSize(),
+                                    fontScale = lyricFontScale
                                 )
                             } else {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2102,7 +2205,8 @@ fun ImmersiveScreensaverView(
                                         showControls = !showControls
                                         lastInteractionTime = System.currentTimeMillis()
                                     },
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier.fillMaxSize(),
+                                    fontScale = lyricFontScale
                                 )
                             } else {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2274,7 +2378,8 @@ fun ImmersiveScreensaverView(
                                     showControls = !showControls
                                     lastInteractionTime = System.currentTimeMillis()
                                 },
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier.fillMaxSize(),
+                                fontScale = lyricFontScale
                             )
                         } else {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2337,15 +2442,28 @@ fun ImmersiveScreensaverView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Top Left: Clock, Battery, and App Source Badge
+                // Top Left: Clock, Battery Status, Sleep Timer, and App Source Badge
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
-                            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)), RoundedCornerShape(12.dp))
+                            .background(
+                                color = if (isCharging) Color(0xFF4ADE80).copy(alpha = 0.15f)
+                                else if (batteryLevel <= 15) Color(0xFFF87171).copy(alpha = 0.15f)
+                                else Color.White.copy(alpha = 0.10f),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .border(
+                                BorderStroke(
+                                    1.dp,
+                                    if (isCharging) Color(0xFF4ADE80).copy(alpha = 0.35f)
+                                    else if (batteryLevel <= 15) Color(0xFFF87171).copy(alpha = 0.35f)
+                                    else Color.White.copy(alpha = 0.12f)
+                                ),
+                                RoundedCornerShape(12.dp)
+                            )
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Row(
@@ -2353,13 +2471,21 @@ fun ImmersiveScreensaverView(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.BatteryStd,
-                                contentDescription = "배터리 상태",
-                                tint = Color.White.copy(alpha = 0.8f),
+                                imageVector = when {
+                                    isCharging -> Icons.Rounded.BatteryChargingFull
+                                    batteryLevel <= 15 -> Icons.Rounded.BatteryAlert
+                                    else -> Icons.Rounded.BatteryStd
+                                },
+                                contentDescription = "배터리 및 충전 상태",
+                                tint = when {
+                                    isCharging -> Color(0xFF4ADE80)
+                                    batteryLevel <= 15 -> Color(0xFFF87171)
+                                    else -> Color.White.copy(alpha = 0.8f)
+                                },
                                 modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = "$batteryLevel%",
+                                text = if (isCharging) "$batteryLevel% ⚡" else "$batteryLevel%",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White.copy(alpha = 0.9f),
@@ -2420,11 +2546,29 @@ fun ImmersiveScreensaverView(
                     }
                 }
 
-                // Top Right: Visualizer Modes & Direct Close
+                // Top Right: Font Size, Sleep Timer, Visualizer Modes & Direct Close
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Lyric Font Size adjustment button
+                    VisualizerSmallIconToggle(
+                        icon = Icons.Rounded.FormatSize,
+                        active = lyricFontScale != 1.0f,
+                        onClick = {
+                            lyricFontScale = when (lyricFontScale) {
+                                0.85f -> 1.0f
+                                1.0f -> 1.25f
+                                1.25f -> 1.4f
+                                else -> 0.85f
+                            }
+                            sharedPrefs.edit().putFloat("lyric_font_scale", lyricFontScale).apply()
+                            lastInteractionTime = System.currentTimeMillis()
+                        }
+                    )
+
+                    Box(modifier = Modifier.width(1.dp).height(16.dp).background(Color.White.copy(alpha = 0.2f)))
+
                     VisualizerSmallIconToggle(
                         icon = Icons.Rounded.TrackChanges,
                         active = visualizerMode == VisualizerMode.NEBULA_RING,

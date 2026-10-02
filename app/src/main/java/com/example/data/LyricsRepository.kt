@@ -21,7 +21,10 @@ class LyricsRepository(private val context: Context) {
     ): CachedLyrics = withContext(Dispatchers.IO) {
         val songId = GeminiLyricsService.generateSongId(title, artist)
         val cached = dao.getLyricsById(songId)
-        if (cached != null) {
+
+        // Fallback entries are only temporary UI placeholders. Do not let them
+        // block a later network lookup when the real lyrics become available.
+        if (cached != null && !GeminiLyricsService.isFallbackLyrics(cached)) {
             return@withContext cached
         }
 
@@ -33,7 +36,13 @@ class LyricsRepository(private val context: Context) {
             durationMs = durationMs,
             customQuery = customQuery
         )
-        dao.insertLyrics(fetched)
+
+        // Never persist the synthetic fallback. Otherwise the next request for
+        // the same song would immediately return the placeholder forever.
+        if (!GeminiLyricsService.isFallbackLyrics(fetched)) {
+            dao.insertLyrics(fetched)
+        }
+
         fetched
     }
 

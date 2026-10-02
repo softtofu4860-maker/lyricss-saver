@@ -36,6 +36,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val mediaState = MediaStateHolder.mediaState
 
+    private val _translationMode = MutableStateFlow(com.example.data.TranslationMode.BILINGUAL)
+    val translationMode: StateFlow<com.example.data.TranslationMode> = _translationMode.asStateFlow()
+
+    fun setTranslationMode(mode: com.example.data.TranslationMode) {
+        _translationMode.value = mode
+    }
+
+    fun cycleTranslationMode() {
+        val modes = com.example.data.TranslationMode.values()
+        val nextIdx = (modes.indexOf(_translationMode.value) + 1) % modes.size
+        _translationMode.value = modes[nextIdx]
+    }
+
     val savedLyrics: StateFlow<List<CachedLyrics>> = repository.getAllSavedLyrics()
         .map { list ->
             list.filter { !com.example.api.GeminiLyricsService.isFallbackLyrics(it) }

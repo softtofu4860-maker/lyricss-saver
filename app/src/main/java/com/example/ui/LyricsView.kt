@@ -22,6 +22,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.LyricLine
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -62,9 +64,22 @@ fun LyricsView(
             with(density) { paddingOffsetDp.roundToPx() }
         }
 
-        // Auto-scroll to active lyric line with high precision (Centering)
-        LaunchedEffect(activeIndex) {
-            if (lines.isNotEmpty() && activeIndex >= 0) {
+        val coroutineScope = rememberCoroutineScope()
+        var isUserBrowsing by remember { mutableStateOf(false) }
+
+        // Detect user scrolling
+        LaunchedEffect(lazyListState.isScrollInProgress) {
+            if (lazyListState.isScrollInProgress) {
+                isUserBrowsing = true
+            } else if (isUserBrowsing) {
+                delay(4500)
+                isUserBrowsing = false
+            }
+        }
+
+        // Auto-scroll to active lyric line with high precision (Centering) - only when not browsing
+        LaunchedEffect(activeIndex, isUserBrowsing) {
+            if (!isUserBrowsing && lines.isNotEmpty() && activeIndex >= 0) {
                 try {
                     val targetIndex = activeIndex + 1
                     val visibleItem = lazyListState.layoutInfo.visibleItemsInfo.find { it.index == targetIndex }
@@ -77,7 +92,7 @@ fun LyricsView(
                                     initialValue = 0f,
                                     targetValue = delta.toFloat(),
                                     animationSpec = androidx.compose.animation.core.tween(
-                                        durationMillis = 650,
+                                        durationMillis = 550,
                                         easing = androidx.compose.animation.core.FastOutSlowInEasing
                                     )
                                 ) { value, _ ->
@@ -171,6 +186,15 @@ fun LyricsView(
                         ) {
                             // Seek to song position of the clicked line
                             onLineClicked((line.timeSec * 1000).toLong())
+                            isUserBrowsing = false
+                            coroutineScope.launch {
+                                try {
+                                    lazyListState.animateScrollToItem(
+                                        index = index + 1,
+                                        scrollOffset = -paddingOffsetPx
+                                    )
+                                } catch (e: Exception) {}
+                            }
                         }
                 )
             }
@@ -256,9 +280,22 @@ fun MinimalLyricsView(
             with(density) { paddingOffsetDp.roundToPx() }
         }
 
-        // Auto-scroll to active lyric line with high precision
-        LaunchedEffect(activeIndex) {
-            if (lines.isNotEmpty() && activeIndex >= 0) {
+        val coroutineScope = rememberCoroutineScope()
+        var isUserBrowsing by remember { mutableStateOf(false) }
+
+        // Detect user scrolling
+        LaunchedEffect(lazyListState.isScrollInProgress) {
+            if (lazyListState.isScrollInProgress) {
+                isUserBrowsing = true
+            } else if (isUserBrowsing) {
+                delay(4500)
+                isUserBrowsing = false
+            }
+        }
+
+        // Auto-scroll to active lyric line with high precision - only when not browsing
+        LaunchedEffect(activeIndex, isUserBrowsing) {
+            if (!isUserBrowsing && lines.isNotEmpty() && activeIndex >= 0) {
                 try {
                     val targetIndex = activeIndex + 1
                     val visibleItem = lazyListState.layoutInfo.visibleItemsInfo.find { it.index == targetIndex }
@@ -271,7 +308,7 @@ fun MinimalLyricsView(
                                     initialValue = 0f,
                                     targetValue = delta.toFloat(),
                                     animationSpec = androidx.compose.animation.core.tween(
-                                        durationMillis = 650,
+                                        durationMillis = 550,
                                         easing = androidx.compose.animation.core.FastOutSlowInEasing
                                     )
                                 ) { value, _ ->
@@ -341,6 +378,15 @@ fun MinimalLyricsView(
                             indication = null
                         ) {
                             onLineClicked((line.timeSec * 1000).toLong())
+                            isUserBrowsing = false
+                            coroutineScope.launch {
+                                try {
+                                    lazyListState.animateScrollToItem(
+                                        index = index + 1,
+                                        scrollOffset = -paddingOffsetPx
+                                    )
+                                } catch (e: Exception) {}
+                            }
                         }
                 ) {
                     subLines.forEachIndexed { subIndex, subLineText ->
@@ -370,6 +416,18 @@ fun MinimalLyricsView(
                             lineHeight = (fontSize.value * 1.35f).sp,
                             modifier = Modifier.fillMaxWidth()
                         )
+                        if (subIndex == 0 && !line.translation.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = line.translation,
+                                color = if (isActive) Color.White.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.5f),
+                                fontSize = (fontSize.value * 0.72f).coerceAtLeast(12f).sp,
+                                fontWeight = FontWeight.Normal,
+                                textAlign = TextAlign.End,
+                                lineHeight = ((fontSize.value * 0.72f).coerceAtLeast(12f) * 1.3f).sp,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                         if (subIndex < subLines.size - 1) {
                             Spacer(modifier = Modifier.height(4.dp))
                         }

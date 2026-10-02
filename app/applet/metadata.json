@@ -1,0 +1,6 @@
+{
+  "name": "스마트 음악 화면보호기",
+  "description": "애플뮤직 스타일의 실시간 동기화 가사와 유려한 화면보호기를 제공하는 음악 플레이어 연동 앱",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

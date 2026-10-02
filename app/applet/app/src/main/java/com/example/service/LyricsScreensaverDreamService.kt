@@ -34,8 +34,8 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.api.GeminiLyricsService
 import com.example.data.LyricLine
 import com.example.data.LyricsRepository
-import com.example.ui.AppleMusicScreensaverView
-import com.example.ui.LyricsCorrectionDialog
+import com.example.ui.components.AppleMusicLandscapeScreensaver
+import com.example.ui.components.LyricsCorrectionDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -142,25 +142,48 @@ private fun DreamScreensaverScreen(
                 val cached = repository.getLyrics(title, artist, durationMs = mediaState.durationMs)
                 lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
                 auraColors = parseAuraColors(cached.hexColorsJson)
-            } catch (e: Exception) {}
+            } catch (_: Exception) {}
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        AppleMusicScreensaverView(
+        AppleMusicLandscapeScreensaver(
             mediaState = mediaState,
-            lyricsLines = lyrics,
-            onCloseClicked = onWakeUp
+            lyrics = lyrics,
+            auraColors = auraColors,
+            onSeekTo = { pos ->
+                MediaStateHolder.setPlaybackPosition(pos)
+                MusicNotificationListener.activeController?.transportControls?.seekTo(pos)
+            },
+            onTogglePlayPause = {
+                val controller = MusicNotificationListener.activeController
+                if (mediaState.isPlaying) {
+                    controller?.transportControls?.pause()
+                    MediaStateHolder.setPlayingState(false)
+                } else {
+                    controller?.transportControls?.play()
+                    MediaStateHolder.setPlayingState(true)
+                }
+            },
+            onSkipToNext = {
+                MusicNotificationListener.activeController?.transportControls?.skipToNext()
+            },
+            onSkipToPrevious = {
+                MusicNotificationListener.activeController?.transportControls?.skipToPrevious()
+            },
+            onOpenCorrectionDialog = {
+                showCorrectionDialog = true
+            },
+            onClose = onWakeUp
         )
 
         if (showCorrectionDialog) {
             LyricsCorrectionDialog(
-                title = mediaState.title ?: "",
-                artist = mediaState.artist ?: "",
-                currentLines = lyrics,
-                durationMs = mediaState.durationMs,
+                initialTitle = mediaState.title ?: "",
+                initialArtist = mediaState.artist ?: "",
                 onDismiss = { showCorrectionDialog = false },
-                onReSearchRequested = { q ->
+                onSearchWithQuery = { q ->
+                    // 수동 검색
                     val title = mediaState.title ?: ""
                     val artist = mediaState.artist ?: ""
                     CoroutineScope(Dispatchers.IO).launch {
@@ -176,21 +199,11 @@ private fun DreamScreensaverScreen(
                         } catch (_: Exception) {}
                     }
                 },
-                onSaveManualLyrics = { newLines ->
-                    lyrics = newLines
+                onSaveCustomLrc = { lrc ->
                     val title = mediaState.title ?: ""
                     val artist = mediaState.artist ?: ""
-                    CoroutineScope(Dispatchers.IO).launch {
-                        repository.saveLyrics(
-                            com.example.data.CachedLyrics(
-                                id = GeminiLyricsService.generateSongId(title, artist),
-                                title = title,
-                                artist = artist,
-                                lyricsJson = GeminiLyricsService.lyricAdapter.toJson(newLines),
-                                hexColorsJson = GeminiLyricsService.getElegantAuraColors(title, artist)
-                            )
-                        )
-                    }
+                    val parsed = GeminiLyricsService.parseLrcLyrics(lrc, mediaState.durationMs)
+                    lyrics = parsed
                 }
             )
         }

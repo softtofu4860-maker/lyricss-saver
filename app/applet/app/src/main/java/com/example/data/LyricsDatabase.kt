@@ -4,9 +4,6 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 @Database(entities = [CachedLyrics::class], version = 2, exportSchema = false)
 abstract class LyricsDatabase : RoomDatabase() {
@@ -24,19 +21,6 @@ abstract class LyricsDatabase : RoomDatabase() {
                     "lyrics_database"
                 )
                     .fallbackToDestructiveMigration(true)
-                    .addCallback(object : RoomDatabase.Callback() {
-                        override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-                            super.onCreate(db)
-                            CoroutineScope(Dispatchers.IO).launch {
-                                try {
-                                    val dao = getDatabase(context).lyricsDao()
-                                    SampleDataProvider.getSampleSongs().forEach {
-                                        dao.insertLyrics(it)
-                                    }
-                                } catch (e: Exception) {}
-                            }
-                        }
-                    })
                     .build()
                 INSTANCE = instance
                 instance

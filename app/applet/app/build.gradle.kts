@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
 
@@ -14,17 +13,6 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-
-        val geminiKey = (project.findProperty("GEMINI_API_KEY") as? String)
-            ?: System.getenv("GEMINI_API_KEY")
-            ?: run {
-                val devEnv = file("/app/.dev.env.json")
-                if (devEnv.exists()) {
-                    val match = Regex("\"GEMINI_API_KEY\"\\s*:\\s*\"([^\"]+)\"").find(devEnv.readText())
-                    match?.groupValues?.get(1)
-                } else null
-            } ?: ""
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
     }
 
     buildFeatures {
@@ -35,6 +23,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
     }
 }
 

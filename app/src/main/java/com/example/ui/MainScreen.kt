@@ -80,9 +80,19 @@ fun MainScreen(
     var isPermissionEnabled by remember {
         mutableStateOf(MusicNotificationListener.isNotificationServiceEnabled(context))
     }
+    var demoModeActive by remember { mutableStateOf(true) }
 
-    var screensaverActive by remember { mutableStateOf(false) }
+    var screensaverActive by remember { mutableStateOf(true) }
     var selectedVisualizerMode by remember { mutableStateOf(VisualizerMode.NEBULA_RING) }
+
+    // On initial launch, start sample song if no track is playing so preview and downloaded APK immediately show live music & lyrics
+    LaunchedEffect(Unit) {
+        if (mediaState.title.isNullOrEmpty()) {
+            val sample = com.example.data.SampleDataProvider.getSampleSongs().first()
+            com.example.data.SampleDataProvider.playSampleSong(sample)
+            viewModel.loadLyricsFromLibrary(sample)
+        }
+    }
 
     // Periodically poll for the permission status only if it's currently disabled, stopping completely once enabled!
     LaunchedEffect(isPermissionEnabled) {
@@ -104,7 +114,7 @@ fun MainScreen(
                 .padding(innerPadding)
         ) {
             when {
-                !isPermissionEnabled -> {
+                !isPermissionEnabled && !demoModeActive -> {
                     PermissionOnboardingScreen(
                         onGrantClicked = {
                             try {
@@ -116,6 +126,13 @@ fun MainScreen(
                                 val intent = Intent(Settings.ACTION_SETTINGS)
                                 context.startActivity(intent)
                             }
+                        },
+                        onSkipToDemoClicked = {
+                            demoModeActive = true
+                            val sample = com.example.data.SampleDataProvider.getSampleSongs().first()
+                            com.example.data.SampleDataProvider.playSampleSong(sample)
+                            viewModel.loadLyrics(sample.title, sample.artist, durationMs = 186000L)
+                            screensaverActive = true
                         }
                     )
                 }
@@ -162,7 +179,27 @@ fun MainScreen(
                         bpm = activeBpm,
                         visualizerMode = selectedVisualizerMode,
                         onCloseClicked = { screensaverActive = false },
-                        onModeChanged = { selectedVisualizerMode = it }
+                        onModeChanged = { selectedVisualizerMode = it },
+                        onSelectSampleSong = { song ->
+                            com.example.data.SampleDataProvider.playSampleSong(song)
+                            viewModel.loadLyricsFromLibrary(song)
+                        },
+                        isPermissionGranted = isPermissionEnabled,
+                        onRequestPermission = {
+                            try {
+                                val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                try {
+                                    val intent = Intent(Settings.ACTION_SETTINGS).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(intent)
+                                } catch (ex: Exception) {}
+                            }
+                        }
                     )
                 }
                 else -> {
@@ -204,7 +241,8 @@ fun MainScreen(
 
 @Composable
 fun PermissionOnboardingScreen(
-    onGrantClicked: () -> Unit
+    onGrantClicked: () -> Unit,
+    onSkipToDemoClicked: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -303,7 +341,44 @@ fun PermissionOnboardingScreen(
             )
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = onSkipToDemoClicked,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+            border = BorderStroke(1.dp, Color(0xFF67E8F9).copy(alpha = 0.5f)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = null,
+                tint = Color(0xFF67E8F9),
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "🎵 샘플 음악으로 앱 바로 체험하기",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "💡 Android 13 이상에서 설정이 흐리게 비활성화된 경우:\n스마트폰 설정 > 앱 > 본 앱 > 우측 상단 ⋮ > '제한된 설정 허용'을 켜주세요.",
+            fontSize = 12.sp,
+            color = Color(0xFFFDE68A).copy(alpha = 0.85f),
+            textAlign = TextAlign.Center,
+            lineHeight = 17.sp,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         Text(
             text = "*이 애플리케이션은 알림 액세스 권한만을 사용하여 안전하게 미디어 상태를 연동하며 개인정보를 유출하지 않습니다.",
@@ -377,8 +452,6 @@ fun DashboardScreen(
 
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val isTablet = configuration.screenWidthDp >= 600
-    val useTwoColumnLayout = isLandscape || isTablet
 
     val isActive = !mediaState.title.isNullOrEmpty()
 
@@ -529,7 +602,7 @@ fun DashboardScreen(
                     )
 
                 } else {
-                    // Empty state instruction
+                    // Empty state instruction with Sample Play button
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -539,17 +612,44 @@ fun DashboardScreen(
                         Icon(
                             imageVector = Icons.Rounded.Headphones,
                             contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.15f),
-                            modifier = Modifier.size(48.dp)
+                            tint = Color.White.copy(alpha = 0.25f),
+                            modifier = Modifier.size(44.dp)
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "멜론, 지니, 스포티파이, 유튜브 등\n외부 음악 앱을 작동시키고 돌아오세요!",
+                            text = "스포티파이, 멜론, 유튜브 등 음악 앱을 재생하면\n실시간으로 가사가 자동 연동됩니다.",
                             fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.4f),
+                            color = Color.White.copy(alpha = 0.6f),
                             textAlign = TextAlign.Center,
                             lineHeight = 18.sp
                         )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Button(
+                            onClick = {
+                                val sample = com.example.data.SampleDataProvider.getSampleSongs().first()
+                                com.example.data.SampleDataProvider.playSampleSong(sample)
+                                onSelectSavedSong(sample)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White.copy(alpha = 0.15f)
+                            ),
+                            border = BorderStroke(1.dp, Color(0xFF67E8F9).copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = Color(0xFF67E8F9),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "체험용 샘플 음악 재생 (Ditto - NewJeans)",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -1092,6 +1192,83 @@ fun DashboardScreen(
         }
     }
 
+    // 4.4 Recommended Lyrics Sources Card
+    val recommendedSourcesContent = @Composable {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF131318)),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CloudDownload,
+                        contentDescription = null,
+                        tint = Color(0xFF38BDF8),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "추천 가사 검색 엔진 & 소스",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "앱이 실시간 병렬 탐색으로 가사와 싱크를 자동 검색합니다",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val sources = listOf(
+                        Triple("LRCLIB", "추천 1위 • 타임싱크", Color(0xFF4ADE80)),
+                        Triple("LrcMux", "통합 검색 • 고화질", Color(0xFF38BDF8)),
+                        Triple("알송 (ALSong)", "국내 가요 • K-Pop", Color(0xFFFACC15)),
+                        Triple("Lyrics.ovh", "팝송 • 해외 인디", Color(0xFFC084FC)),
+                        Triple("ChartLyrics", "클래식 팝", Color(0xFFFB923C)),
+                        Triple("Gemini AI", "AI 자동 번역", Color(0xFFE879F9))
+                    )
+                    items(sources) { (name, tag, color) ->
+                        Box(
+                            modifier = Modifier
+                                .background(color.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                                .border(BorderStroke(1.dp, color.copy(alpha = 0.3f)), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = tag,
+                                    fontSize = 9.sp,
+                                    color = color,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = name,
+                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 4.5 Saved Lyrics Library Card
     val savedLyricsLibraryContent = @Composable {
         Card(
@@ -1260,22 +1437,28 @@ fun DashboardScreen(
         }
     }
 
-    // 6. Massive launch button
+    // 6. Massive launch button (always enabled, auto-starts demo if empty)
     val launchButtonContent = @Composable {
         Button(
-            onClick = onLaunchScreensaver,
-            enabled = isActive,
+            onClick = {
+                if (!isActive) {
+                    val sample = com.example.data.SampleDataProvider.getSampleSongs().first()
+                    com.example.data.SampleDataProvider.playSampleSong(sample)
+                    onSelectSavedSong(sample)
+                }
+                onLaunchScreensaver()
+            },
+            enabled = true,
             colors = ButtonDefaults.buttonColors(
                 containerColor = Color.White,
-                contentColor = Color.Black,
-                disabledContainerColor = Color.White.copy(alpha = 0.05f)
+                contentColor = Color.Black
             ),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(58.dp)
                 .shadow(
-                    elevation = if (isActive) 12.dp else 0.dp,
+                    elevation = 12.dp,
                     shape = RoundedCornerShape(14.dp),
                     clip = false
                 )
@@ -1283,75 +1466,42 @@ fun DashboardScreen(
             Icon(
                 imageVector = Icons.Rounded.Tv,
                 contentDescription = null,
-                tint = if (isActive) Color.Black else Color.White.copy(alpha = 0.3f)
+                tint = Color.Black
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
                 text = "시각 화면보호기 몰입하기",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isActive) Color.Black else Color.White.copy(alpha = 0.3f)
+                color = Color.Black
             )
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (useTwoColumnLayout) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    headerContent()
-                    Spacer(modifier = Modifier.height(4.dp))
-                    playerCardContent()
-                    systemBatteryCardContent()
-                    Spacer(modifier = Modifier.height(4.dp))
-                    visualizerSelectorContent()
-                }
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    lyricsCacheContent()
-                    savedLyricsLibraryContent()
-                    apiKeySettingContent()
-                    systemDreamContent()
-                    Spacer(modifier = Modifier.weight(1f))
-                    launchButtonContent()
-                }
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                headerContent()
-                playerCardContent()
-                systemBatteryCardContent()
-                visualizerSelectorContent()
-                lyricsCacheContent()
-                savedLyricsLibraryContent()
-                apiKeySettingContent()
-                systemDreamContent()
-                Spacer(modifier = Modifier.height(16.dp))
-                launchButtonContent()
-            }
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = 680.dp)
+                .padding(horizontal = 20.dp, vertical = 24.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            headerContent()
+            playerCardContent()
+            systemBatteryCardContent()
+            visualizerSelectorContent()
+            lyricsCacheContent()
+            recommendedSourcesContent()
+            savedLyricsLibraryContent()
+            apiKeySettingContent()
+            systemDreamContent()
+            Spacer(modifier = Modifier.height(16.dp))
+            launchButtonContent()
         }
 
         // Sidebar Backdrop Dim Overlay
@@ -1611,7 +1761,10 @@ fun ImmersiveScreensaverView(
     bpm: Int,
     visualizerMode: VisualizerMode,
     onCloseClicked: () -> Unit,
-    onModeChanged: (VisualizerMode) -> Unit
+    onModeChanged: (VisualizerMode) -> Unit,
+    onSelectSampleSong: ((com.example.data.CachedLyrics) -> Unit)? = null,
+    isPermissionGranted: Boolean = true,
+    onRequestPermission: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val rawPrimary = vibeColors.getOrElse(0) { Color(0xFF38BDF8) }
@@ -1757,12 +1910,29 @@ fun ImmersiveScreensaverView(
         mutableStateOf(
             try {
                 ScreensaverTheme.valueOf(
-                    sharedPrefs.getString("screensaver_theme", ScreensaverTheme.CLASSIC_NEON.name) ?: ScreensaverTheme.CLASSIC_NEON.name
+                    sharedPrefs.getString("screensaver_theme", ScreensaverTheme.APPLE_MUSIC_LYRICS.name) ?: ScreensaverTheme.APPLE_MUSIC_LYRICS.name
                 )
             } catch (e: Exception) {
-                ScreensaverTheme.CLASSIC_NEON
+                ScreensaverTheme.APPLE_MUSIC_LYRICS
             }
         )
+    }
+
+    if (currentTheme == ScreensaverTheme.APPLE_MUSIC_LYRICS) {
+        AppleMusicScreensaverView(
+            mediaState = mediaState,
+            lyricsLines = lyricsLines,
+            onCloseClicked = onCloseClicked,
+            onSwitchTheme = {
+                currentTheme = ScreensaverTheme.CLASSIC_NEON
+                sharedPrefs.edit().putString("screensaver_theme", currentTheme.name).apply()
+            },
+            onSelectSampleSong = onSelectSampleSong,
+            onOpenDashboard = onCloseClicked,
+            isPermissionGranted = isPermissionGranted,
+            onRequestPermission = onRequestPermission
+        )
+        return
     }
 
     // Auto-hide controls when playing after 6 seconds of inactivity (if not pinned)
@@ -1968,7 +2138,11 @@ fun ImmersiveScreensaverView(
                                         activeColor = activeLyricColor,
                                         onLineClicked = { seekPosMs ->
                                             try {
-                                                MusicNotificationListener.activeController?.transportControls?.seekTo(seekPosMs)
+                                                val controller = MusicNotificationListener.activeController
+                                                controller?.transportControls?.seekTo(seekPosMs)
+                                                if (!mediaState.isPlaying) {
+                                                    controller?.transportControls?.play()
+                                                }
                                                 currentPositionMs = seekPosMs
                                                 lastInteractionTime = System.currentTimeMillis()
                                             } catch (e: Exception) {}
@@ -2023,7 +2197,11 @@ fun ImmersiveScreensaverView(
                                     activeColor = activeLyricColor,
                                     onLineClicked = { seekPosMs ->
                                         try {
-                                            MusicNotificationListener.activeController?.transportControls?.seekTo(seekPosMs)
+                                            val controller = MusicNotificationListener.activeController
+                                            controller?.transportControls?.seekTo(seekPosMs)
+                                            if (!mediaState.isPlaying) {
+                                                controller?.transportControls?.play()
+                                            }
                                             currentPositionMs = seekPosMs
                                             lastInteractionTime = System.currentTimeMillis()
                                         } catch (e: Exception) {}
@@ -2196,7 +2374,11 @@ fun ImmersiveScreensaverView(
                                     activeColor = activeLyricColor,
                                     onLineClicked = { seekPosMs ->
                                         try {
-                                            MusicNotificationListener.activeController?.transportControls?.seekTo(seekPosMs)
+                                            val controller = MusicNotificationListener.activeController
+                                            controller?.transportControls?.seekTo(seekPosMs)
+                                            if (!mediaState.isPlaying) {
+                                                controller?.transportControls?.play()
+                                            }
                                             currentPositionMs = seekPosMs
                                             lastInteractionTime = System.currentTimeMillis()
                                         } catch (e: Exception) {}
@@ -2369,7 +2551,11 @@ fun ImmersiveScreensaverView(
                                 activeColor = activeLyricColor,
                                 onLineClicked = { seekPosMs ->
                                     try {
-                                        MusicNotificationListener.activeController?.transportControls?.seekTo(seekPosMs)
+                                        val controller = MusicNotificationListener.activeController
+                                        controller?.transportControls?.seekTo(seekPosMs)
+                                        if (!mediaState.isPlaying) {
+                                            controller?.transportControls?.play()
+                                        }
                                         currentPositionMs = seekPosMs
                                         lastInteractionTime = System.currentTimeMillis()
                                     } catch (e: Exception) {}
@@ -2598,12 +2784,12 @@ fun ImmersiveScreensaverView(
 
                     VisualizerSmallIconToggle(
                         icon = Icons.Rounded.Palette,
-                        active = currentTheme == ScreensaverTheme.FULL_ART_MINIMAL,
+                        active = currentTheme != ScreensaverTheme.CLASSIC_NEON,
                         onClick = {
-                            currentTheme = if (currentTheme == ScreensaverTheme.CLASSIC_NEON) {
-                                ScreensaverTheme.FULL_ART_MINIMAL
-                            } else {
-                                ScreensaverTheme.CLASSIC_NEON
+                            currentTheme = when (currentTheme) {
+                                ScreensaverTheme.APPLE_MUSIC_LYRICS -> ScreensaverTheme.CLASSIC_NEON
+                                ScreensaverTheme.CLASSIC_NEON -> ScreensaverTheme.FULL_ART_MINIMAL
+                                ScreensaverTheme.FULL_ART_MINIMAL -> ScreensaverTheme.APPLE_MUSIC_LYRICS
                             }
                             sharedPrefs.edit().putString("screensaver_theme", currentTheme.name).apply()
                             lastInteractionTime = System.currentTimeMillis()
@@ -4131,6 +4317,7 @@ fun SidebarLyricsDetailView(
 }
 
 enum class ScreensaverTheme {
+    APPLE_MUSIC_LYRICS,
     CLASSIC_NEON,
     FULL_ART_MINIMAL
 }

@@ -1,38 +1,31 @@
 package com.example.data
 
-/**
- * Conservative matching helpers used before accepting search results.
- * This intentionally rejects weak matches instead of displaying lyrics
- * from a different song.
- */
+/** Conservative matching helpers: prefer no lyrics over lyrics from another song. */
 object LyricsMatchValidator {
-    private val versionSuffixes = Regex("\\s*\\((?:official|lyrics?|audio|video|remastered|remix|live|acoustic|radio|edit|version|ver\\.?)[^)]*\\)\\s*$", RegexOption.IGNORE_CASE)
+    private val removableSuffix = Regex("\\s*\\((?:official|lyrics?|audio|video|remastered|remix|live|acoustic|radio|edit|version|ver\\.?)[^)]*\\)\\s*$", RegexOption.IGNORE_CASE)
     private val punctuation = Regex("[^\\p{L}\\p{N}]+")
 
-    fun normalize(value: String): String {
-        return value
-            .lowercase()
-            .replace(versionSuffixes, "")
-            .replace(punctuation, "")
-            .trim()
-    }
+    fun normalize(value: String): String = value.lowercase().replace(removableSuffix, "").replace(punctuation, "").trim()
 
     fun titleMatches(expected: String, actual: String?): Boolean {
         if (actual.isNullOrBlank()) return false
-        val a = normalize(expected)
-        val b = normalize(actual)
+        val a = normalize(expected); val b = normalize(actual)
+        return a.isNotEmpty() && b.isNotEmpty() && (a == b || a.contains(b) || b.contains(a))
+    }
+
+    fun titleSimilar(expected: String, actual: String?): Boolean {
+        if (actual.isNullOrBlank()) return false
+        val a = normalize(expected); val b = normalize(actual)
         if (a.isEmpty() || b.isEmpty()) return false
-        return a == b || a.contains(b) || b.contains(a)
+        val shorter = minOf(a.length, b.length).toFloat(); val longer = maxOf(a.length, b.length).toFloat()
+        return shorter / longer >= 0.72f
     }
 
     fun artistMatches(expected: String, actual: String?): Boolean {
         if (actual.isNullOrBlank()) return false
-        val expectedParts = expected
-            .split("&", ",", "/", " feat. ", " feat ", " ft. ", " ft ", " featuring ", " x ")
-            .map { normalize(it) }
-            .filter { it.isNotEmpty() }
         val actualNormalized = normalize(actual)
-        if (expectedParts.isEmpty() || actualNormalized.isEmpty()) return false
-        return expectedParts.any { it == actualNormalized || actualNormalized.contains(it) || it.contains(actualNormalized) }
+        val parts = expected.split("&", ",", "/", " feat. ", " feat ", " ft. ", " ft ", " featuring ", " x ")
+            .map(::normalize).filter { it.isNotEmpty() }
+        return parts.any { it == actualNormalized || actualNormalized.contains(it) || it.contains(actualNormalized) }
     }
 }

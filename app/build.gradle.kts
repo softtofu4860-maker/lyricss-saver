@@ -18,6 +18,13 @@ android {
         val geminiKey = (project.findProperty("GEMINI_API_KEY") as? String)
             ?: System.getenv("GEMINI_API_KEY")
             ?: run {
+                val envFile = rootProject.file(".env")
+                if (envFile.exists()) {
+                    val match = Regex("(?m)^GEMINI_API_KEY=(.*)$").find(envFile.readText())
+                    match?.groupValues?.get(1)?.trim()?.removeSurrounding("\"")
+                } else null
+            }
+            ?: run {
                 val devEnv = file("/app/.dev.env.json")
                 if (devEnv.exists()) {
                     val match = Regex("\"GEMINI_API_KEY\"\\s*:\\s*\"([^\"]+)\"").find(devEnv.readText())
@@ -27,9 +34,28 @@ android {
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
     }
 
+    signingConfigs {
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debugConfig")
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     compileOptions {
@@ -63,4 +89,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.moshi:moshi:1.15.2")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.2")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.robolectric:robolectric:4.16.1")
 }

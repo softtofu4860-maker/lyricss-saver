@@ -11,6 +11,7 @@ import com.example.service.MediaStateHolder
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -61,6 +62,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastLoadedSongKey = ""
     private var lastMetadataLyrics: String? = null
+    private var lyricsLoadJob: Job? = null
 
     init {
         // Automatically fetch lyrics when intercepted song changes or metadata lyrics become available
@@ -77,6 +79,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         loadLyrics(title, artist, metadataLyrics, state.durationMs)
                     }
                 } else {
+                    lyricsLoadJob?.cancel()
                     _lyricsState.value = LyricsUiState.Empty
                     lastLoadedSongKey = ""
                     lastMetadataLyrics = null
@@ -86,12 +89,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadLyrics(title: String, artist: String, metadataLyrics: String? = null, durationMs: Long = 0, customQuery: String? = null) {
-        viewModelScope.launch {
+        // A previous request can finish after the user has already changed songs.
+        // Cancel it so an old result cannot overwrite the current song's lyrics.
+        lyricsLoadJob?.cancel()
+        lyricsLoadJob = viewModelScope.launch {
             _lyricsState.value = LyricsUiState.Loading
             try {
                 Log.d(tag, "Fetching lyrics in ViewModel for: $title by $artist, customQuery: $customQuery")
                 val lyricsData = repository.getLyrics(title, artist, metadataLyrics, durationMs, customQuery)
-                
+
                 // Parse lines JSON
                 val typeLines = Types.newParameterizedType(List::class.java, LyricLine::class.java)
                 val linesAdapter = moshi.adapter<List<LyricLine>>(typeLines)
@@ -103,6 +109,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val colors = colorsAdapter.fromJson(lyricsData.hexColorsJson) ?: listOf("#00FFFF", "#8A2BE2")
 
                 _lyricsState.value = LyricsUiState.Success(lyricsData, lines, colors)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Expected when the active song changes; do not show an error.
+                throw e
             } catch (e: Exception) {
                 Log.e(tag, "Error loading lyrics in ViewModel", e)
                 _lyricsState.value = LyricsUiState.Error("Error: ${e.message}")
@@ -116,14 +125,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val songId = com.example.api.GeminiLyricsService.generateSongId(title, artist)
                 val database = com.example.data.LyricsDatabase.getDatabase(getApplication())
                 val dao = database.lyricsDao()
-                
+
                 // Retrieve existing entry to preserve other fields like bpm, colors, genre
                 val existing = dao.getLyricsById(songId)
-                
+
                 val typeLines = Types.newParameterizedType(List::class.java, LyricLine::class.java)
                 val linesAdapter = moshi.adapter<List<LyricLine>>(typeLines)
                 val newLyricsJson = linesAdapter.toJson(editedLines)
-                
+
                 val updatedLyrics = if (existing != null) {
                     existing.copy(
                         lyricsJson = newLyricsJson,
@@ -143,13 +152,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         timestamp = System.currentTimeMillis()
                     )
                 }
-                
+
                 dao.insertLyrics(updatedLyrics)
-                
+
                 // Update active state
                 val colorsAdapter = moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
                 val colors = try { colorsAdapter.fromJson(updatedLyrics.hexColorsJson) ?: listOf("#00FFFF", "#8A2BE2") } catch (e: Exception) { listOf("#00FFFF", "#8A2BE2") }
-                
+
                 _lyricsState.value = LyricsUiState.Success(updatedLyrics, editedLines, colors)
             } catch (e: Exception) {
                 Log.e(tag, "Error saving manual lyrics", e)
@@ -177,6 +186,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadLyricsFromLibrary(cachedLyrics: CachedLyrics) {
+        // Keep the media-state update below from being interpreted as a newly
+        // detected song and triggering another network lookup.
+        lastLoadedSongKey = "${cachedLyrics.artist.lowercase()}_${cachedLyrics.title.lowercase()}"
+        lastMetadataLyrics = null
+        lyricsLoadJob?.cancel()
+
         viewModelScope.launch {
             _lyricsState.value = LyricsUiState.Loading
             try {
@@ -191,7 +206,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val colors = colorsAdapter.fromJson(cachedLyrics.hexColorsJson) ?: listOf("#00FFFF", "#8A2BE2")
 
                 _lyricsState.value = LyricsUiState.Success(cachedLyrics, lines, colors)
-                
+
                 // Update mediaState so the player card matches this selected song!
                 com.example.service.MediaStateHolder.updateState(
                     title = cachedLyrics.title,
@@ -200,7 +215,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     isPlaying = false,
                     positionMs = 0L,
                     durationMs = if (lines.isNotEmpty()) (lines.last().timeSec * 1000).toLong() + 5000L else 180000L,
-                    packageName = "com.example.library", // Indicate loaded from library
+                    packageName = "com.example.library",
                     lyrics = null
                 )
             } catch (e: Exception) {
@@ -234,7 +249,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val translatedRaw = com.example.api.GeminiLyricsService.translateLyricsViaGemini(rawLrcText, getApplication())
                 val parsedLines = com.example.api.GeminiLyricsService.parseLrcLyrics(translatedRaw, 0L)
-                
+
                 if (parsedLines.isNotEmpty()) {
                     val title = originalLyrics.title
                     val artist = originalLyrics.artist

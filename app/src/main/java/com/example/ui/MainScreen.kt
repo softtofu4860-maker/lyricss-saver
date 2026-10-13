@@ -76,6 +76,17 @@ fun MainScreen(
     val mediaState by viewModel.mediaState.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
     val savedLyrics by viewModel.savedLyrics.collectAsStateWithLifecycle()
+    val translationError by viewModel.translationError.collectAsStateWithLifecycle()
+    if (translationError != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissTranslationError,
+            title = { Text("번역 실패") },
+            text = { Text(translationError.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissTranslationError) { Text("확인") }
+            }
+        )
+    }
 
     var isPermissionEnabled by remember {
         mutableStateOf(MusicNotificationListener.isNotificationServiceEnabled(context))
@@ -309,7 +320,7 @@ fun PermissionOnboardingScreen(
                 )
                 PermissionFeatureRow(
                     icon = Icons.Rounded.Lyrics,
-                    title = "Gemini 가사 동기화",
+                    title = "가사 동기화",
                     desc = "재생 중인 곡의 가사를 완벽하게 검색 및 생성하여, 흘러가는 재생 초 단위 진도에 동기화해 줍니다."
                 )
                 PermissionFeatureRow(
@@ -828,7 +839,7 @@ fun DashboardScreen(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(
-                                    text = "Gemini 가사 큐레이팅 및 로딩 중...",
+                                    text = "가사 검색 및 로딩 중...",
                                     fontSize = 13.sp,
                                     color = Color.White.copy(alpha = 0.6f)
                                 )
@@ -1006,8 +1017,7 @@ fun DashboardScreen(
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                val hasBuildKey = com.example.BuildConfig.GEMINI_API_KEY.isNotEmpty() && com.example.BuildConfig.GEMINI_API_KEY != "MY_GEMINI_API_KEY"
-                val isAiMode = userApiKey.isNotEmpty() || hasBuildKey
+                val isAiMode = userApiKey.isNotBlank()
                 
                 Row(
                     verticalAlignment = Alignment.CenterVertically
@@ -1022,7 +1032,7 @@ fun DashboardScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (isAiMode) "AI 고급 모드 (Gemini 실시간 연동)" else "기본 모드 (무료 LRCLIB 연동)",
+                        text = if (isAiMode) "한국어 번역 사용 가능 (Gemini)" else "기본 모드 (무료 LRCLIB 연동)",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isAiMode) Color(0xFFD8B4FE) else Color(0xFF4ADE80)
@@ -1033,10 +1043,9 @@ fun DashboardScreen(
                 
                 Text(
                     text = if (isAiMode) {
-                        if (userApiKey.isNotEmpty()) "사용자의 개인 Gemini API 키를 사용하여 전 세계의 어떤 희귀곡이나 최신곡이든 실시간 구글 검색을 통해 100% 매칭된 싱크 가사를 생성합니다."
-                        else "시스템에 빌드된 Gemini API 키를 사용하여 실시간 구글 검색을 통해 싱크 가사를 생성합니다."
+                        "개인 Gemini API 키로 불러온 가사를 한국어로 번역합니다. 원문과 싱크 시간은 유지됩니다."
                     } else {
-                        "기본적으로 완전 무료 오픈소스 LRCLIB API와 LrcMux 통합 집계 API를 순서대로 자동 검색합니다. 키 없이도 국내외 인기 곡의 가사를 풍부하게 연동합니다."
+                        "가사는 Spotify 가사 API, LRCLIB, NetEase에서 검색합니다. 검색 결과가 없으면 직접 검색하거나 LRC 파일을 입력할 수 있습니다."
                     },
                     fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.5f),
@@ -1060,7 +1069,7 @@ fun DashboardScreen(
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "AI 고급 모드를 사용하려면 Google AI Studio에서 발급받은 API 키를 입력해 주세요.",
+                            text = "한국어 가사 번역을 사용하려면 개인 Gemini API 키를 입력해 주세요.",
                             fontSize = 13.sp,
                             color = Color.White.copy(alpha = 0.7f),
                             lineHeight = 18.sp
@@ -1086,7 +1095,7 @@ fun DashboardScreen(
                         )
                         if (tempKey.isNotEmpty()) {
                             Text(
-                                text = "개인 키가 등록되면 LRCLIB에 없는 노래도 Gemini 2.5 Flash가 실시간 구글 검색을 통해 싱크로 가사를 완벽히 생성합니다.",
+                                text = "개인 키는 불러온 가사를 한국어로 번역하는 데 사용됩니다. 번역 결과는 원문과 함께 저장됩니다.",
                                 fontSize = 11.sp,
                                 color = Color.White.copy(alpha = 0.7f),
                                 lineHeight = 15.sp

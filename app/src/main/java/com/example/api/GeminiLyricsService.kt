@@ -19,6 +19,10 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import com.example.data.LyricsIdentity
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 data class LrclibResponse(
     val id: Long? = null,
@@ -39,7 +43,8 @@ data class NetEaseArtist(
 data class NetEaseSong(
     val id: Long? = null,
     val name: String? = null,
-    val artists: List<NetEaseArtist>? = null
+    val artists: List<NetEaseArtist>? = null,
+    val durationMs: Long? = null
 )
 
 object GeminiLyricsService {
@@ -57,7 +62,7 @@ object GeminiLyricsService {
     val lyricAdapter: JsonAdapter<List<LyricLine>> = moshi.adapter(lyricListType)
 
     fun generateSongId(title: String, artist: String): String {
-        return "${title.trim().lowercase()}_${artist.trim().lowercase()}".replace(Regex("[^a-zA-Z0-9가-힣_]"), "")
+        return LyricsIdentity.songId(title, artist)
     }
 
     fun isFallbackLyrics(lyrics: CachedLyrics): Boolean {
@@ -76,7 +81,7 @@ object GeminiLyricsService {
         val songId = generateSongId(title, artist)
 
         // 1. 메타데이터에 가사가 이미 있는 경우 (LRC 형식 등)
-        if (!metadataLyrics.isNullOrBlank()) {
+        if (customQuery.isNullOrBlank() && !metadataLyrics.isNullOrBlank()) {
             val parsed = parseLrcLyrics(metadataLyrics, durationMs)
             if (parsed.isNotEmpty()) {
                 val json = lyricAdapter.toJson(parsed)
@@ -92,7 +97,7 @@ object GeminiLyricsService {
 
         // 2. Paxsenix0 Spotify-Lyrics-API (가장 정확한 Spotify 실시간 싱크 가사)
         try {
-            val spotifyLrc = fetchSpotifyLyricsApi(title, artist)
+            val spotifyLrc = if (customQuery.isNullOrBlank()) fetchSpotifyLyricsApi(title, artist) else null
             if (!spotifyLrc.isNullOrBlank()) {
                 val parsed = parseLrcLyrics(spotifyLrc, durationMs)
                 if (parsed.isNotEmpty()) {
@@ -106,14 +111,18 @@ object GeminiLyricsService {
                     )
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "Spotify Lyrics API lookup error: ${e.message}")
         }
 
+        currentCoroutineContext().ensureActive()
         // 3. LRCLIB 검색 (오픈소스 고품질 싱크 가사)
         val query = customQuery ?: "$title $artist"
         try {
-            val lrclibLrc = fetchLrclibDirect(title, artist, durationMs) ?: fetchLrclibFirstResult(query)
+            val lrclibLrc = (if (customQuery.isNullOrBlank()) fetchLrclibDirect(title, artist, durationMs) else null)
+                ?: fetchLrclibFirstResult(query, title, artist, durationMs)
             if (!lrclibLrc.isNullOrBlank()) {
                 val parsed = parseLrcLyrics(lrclibLrc, durationMs)
                 if (parsed.isNotEmpty()) {
@@ -127,13 +136,16 @@ object GeminiLyricsService {
                     )
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "LRCLIB lookup error: ${e.message}")
         }
 
+        currentCoroutineContext().ensureActive()
         // 4. NetEase 검색 (ivLyrics 스타일 한국어 번역 tlyric + 발음 romalrc 포함)
         try {
-            val netEaseResult = fetchNetEaseWithTranslation(title, artist)
+            val netEaseResult = fetchNetEaseWithTranslation(title, artist, durationMs, query)
             if (netEaseResult != null && !netEaseResult.lrc.isNullOrBlank()) {
                 val parsed = parseLrcLyrics(
                     lrcText = netEaseResult.lrc,
@@ -152,10 +164,13 @@ object GeminiLyricsService {
                     )
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "NetEase lookup error: ${e.message}")
         }
 
+        currentCoroutineContext().ensureActive()
         // 5. Fallback: 스마트 가사 라인 생성 (가사 없음 표시 및 타임라인 안내)
         generateSmartFallback(songId, title, artist, durationMs)
     }
@@ -207,6 +222,8 @@ object GeminiLyricsService {
                 }
                 null
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "fetchSpotifyLyricsApi failed: ${e.message}")
             null
@@ -232,20 +249,29 @@ object GeminiLyricsService {
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: return null
                     val json = JSONObject(body)
-                    val synced = json.optString("syncedLyrics")
+                    val synced = if (json.isNull("syncedLyrics")) "" else json.optString("syncedLyrics")
                     if (synced.isNotBlank()) return synced
-                    val plain = json.optString("plainLyrics")
+                    val plain = if (json.isNull("plainLyrics")) "" else json.optString("plainLyrics")
                     if (plain.isNotBlank()) return plain
                 }
             }
             null
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
         }
     }
 
-    private fun fetchLrclibFirstResult(query: String): String? {
-        val results = searchLrclib(query)
+    private fun fetchLrclibFirstResult(query: String, title: String, artist: String, durationMs: Long): String? {
+        val results = searchLrclib(query).filter { candidate ->
+            LyricsMatching.matchesSong(
+                title, artist, candidate.trackName.orEmpty(), listOf(candidate.artistName.orEmpty()),
+                durationMs, candidate.duration?.takeIf { it.isFinite() && it > 0 }?.let { (it * 1000).toLong() }
+            )
+        }.sortedBy { candidate ->
+            candidate.duration?.let { kotlin.math.abs(it * 1000 - durationMs) } ?: Double.MAX_VALUE
+        }
         for (r in results) {
             if (!r.syncedLyrics.isNullOrBlank()) return r.syncedLyrics
         }
@@ -279,13 +305,15 @@ object GeminiLyricsService {
                                 albumName = item.optString("albumName"),
                                 duration = item.optDouble("duration"),
                                 instrumental = item.optBoolean("instrumental"),
-                                plainLyrics = item.optString("plainLyrics").ifBlank { null },
-                                syncedLyrics = item.optString("syncedLyrics").ifBlank { null }
+                                plainLyrics = if (item.isNull("plainLyrics")) null else item.optString("plainLyrics").ifBlank { null },
+                                syncedLyrics = if (item.isNull("syncedLyrics")) null else item.optString("syncedLyrics").ifBlank { null }
                             )
                         )
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "searchLrclib error: ${e.message}")
         }
@@ -320,9 +348,12 @@ object GeminiLyricsService {
                             artistsList.add(NetEaseArtist(a.optLong("id"), a.optString("name")))
                         }
                     }
-                    list.add(NetEaseSong(id, name, artistsList))
+                    list.add(NetEaseSong(id, name, artistsList,
+                        s.optLong("duration").takeIf { it > 0 } ?: s.optLong("dt").takeIf { it > 0 }))
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "searchNetEase error: ${e.message}")
         }
@@ -335,23 +366,16 @@ object GeminiLyricsService {
         val romalrc: String?
     )
 
-    private fun fetchNetEaseWithTranslation(title: String, artist: String): NetEaseLyricsBundle? {
+    private fun fetchNetEaseWithTranslation(
+        title: String, artist: String, durationMs: Long = 0L, query: String = "$title $artist"
+    ): NetEaseLyricsBundle? {
         return try {
-            val query = URLEncoder.encode("$title $artist", "UTF-8")
-            val searchUrl = "https://music.163.com/api/search/get/web?csrf_token=&hlpretag=&hlposttag=&s=$query&type=1&offset=0&total=true&limit=1"
-            val searchReq = Request.Builder()
-                .url(searchUrl)
-                .header("User-Agent", "Mozilla/5.0")
-                .header("Referer", "https://music.163.com/")
-                .build()
-
-            val songId = okHttpClient.newCall(searchReq).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val body = resp.body?.string() ?: return null
-                val root = JSONObject(body)
-                val songs = root.optJSONObject("result")?.optJSONArray("songs") ?: return null
-                if (songs.length() > 0) songs.getJSONObject(0).optLong("id") else null
-            } ?: return null
+            val songId = searchNetEase(query).firstOrNull { candidate ->
+                LyricsMatching.matchesSong(
+                    title, artist, candidate.name.orEmpty(), candidate.artists.orEmpty().map { it.name.orEmpty() },
+                    durationMs, candidate.durationMs
+                )
+            }?.id ?: return null
 
             val lyricUrl = "https://music.163.com/api/song/lyric?os=pc&id=$songId&lv=-1&kv=-1&tv=-1"
             val lyricReq = Request.Builder()
@@ -373,6 +397,8 @@ object GeminiLyricsService {
                     romalrc = romalrc?.ifBlank { null }
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
         }
@@ -483,6 +509,8 @@ object GeminiLyricsService {
     fun parseJsonLyrics(jsonStr: String): List<LyricLine> {
         return try {
             lyricAdapter.fromJson(jsonStr) ?: emptyList()
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             emptyList()
         }
@@ -513,12 +541,13 @@ object GeminiLyricsService {
     }
 
     suspend fun translateLyricsViaGemini(rawLrcText: String, context: Context): String = withContext(Dispatchers.IO) {
-        val apiKey = com.example.BuildConfig.GEMINI_API_KEY
+        val apiKey = context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE)
+            .getString("gemini_api_key", "")?.trim().orEmpty()
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext rawLrcText
+            error("설정에서 개인 Gemini API 키를 입력해 주세요.")
         }
         try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
             val prompt = """
                 Translate the following synchronized LRC lyrics into natural, poetic Korean while strictly preserving the timestamps like [mm:ss.xx].
                 Return ONLY the translated LRC text, without any explanations or markdown backticks.
@@ -541,14 +570,15 @@ object GeminiLyricsService {
 
             val request = Request.Builder()
                 .url(url)
+                .header("x-goog-api-key", apiKey)
                 .post(jsonPayload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             okHttpClient.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext rawLrcText
-                val body = resp.body?.string() ?: return@withContext rawLrcText
+                if (!resp.isSuccessful) error("번역 요청에 실패했습니다 (HTTP ${resp.code}).")
+                val body = resp.body?.string() ?: error("번역 응답이 비어 있습니다.")
                 val respJson = JSONObject(body)
-                val candidates = respJson.optJSONArray("candidates") ?: return@withContext rawLrcText
+                val candidates = respJson.optJSONArray("candidates") ?: error("번역 결과가 없습니다.")
                 if (candidates.length() > 0) {
                     val parts = candidates.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
                     val text = parts?.getJSONObject(0)?.optString("text")
@@ -557,10 +587,12 @@ object GeminiLyricsService {
                     }
                 }
             }
-            rawLrcText
+            error("번역 결과가 비어 있습니다.")
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Gemini translation error: ${e.message}")
-            rawLrcText
+            // Do not log request URLs or credentials.
+            throw IllegalStateException("번역에 실패했습니다. API 키와 네트워크를 확인해 주세요.", e)
         }
     }
 
@@ -574,7 +606,7 @@ object GeminiLyricsService {
             listOf("#FF3730A3", "#FF312E81", "#FF111827", "#FF4338CA"),
             listOf("#FF7C2D12", "#FF451A03", "#FF1C1917", "#FFB45309")
         )
-        val selected = palettes[Math.abs(hash) % palettes.size]
+        val selected = palettes[Math.floorMod(hash, palettes.size)]
         val jsonArray = JSONArray()
         selected.forEach { jsonArray.put(it) }
         return jsonArray.toString()

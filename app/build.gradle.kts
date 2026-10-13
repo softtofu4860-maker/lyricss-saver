@@ -15,38 +15,7 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        val geminiKey = (project.findProperty("GEMINI_API_KEY") as? String)
-            ?: System.getenv("GEMINI_API_KEY")
-            ?: run {
-                val envFile = rootProject.file(".env")
-                if (envFile.exists()) {
-                    val match = Regex("(?m)^GEMINI_API_KEY=(.*)$").find(envFile.readText())
-                    match?.groupValues?.get(1)?.trim()?.removeSurrounding("\"")
-                } else null
-            }
-            ?: run {
-                val devEnv = file("/app/.dev.env.json")
-                if (devEnv.exists()) {
-                    val match = Regex("\"GEMINI_API_KEY\"\\s*:\\s*\"([^\"]+)\"").find(devEnv.readText())
-                    match?.groupValues?.get(1)
-                } else null
-            } ?: ""
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
-    }
 
-    signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
-    }
-
-    buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("debugConfig")
-        }
     }
 
     buildFeatures {

@@ -36,38 +36,9 @@ object SpotifyRemoteManager {
         artist: String
     ): String? = withContext(Dispatchers.IO) {
         Log.d(TAG, "Fetching Spotify track lyrics for Spotify ID: $trackId, Title: $title, Artist: $artist")
-        try {
-            // Attempt to query LRCLIB / Spotify public lyrics endpoint for synced lyrics
-            val cleanTitle = title.replace(Regex("(?i)\\(.*live.*\\)|\\(.*remastered.*\\)"), "").trim()
-            val encodedTitle = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
-            val encodedArtist = java.net.URLEncoder.encode(artist, "UTF-8")
-
-            val apiUrl = "https://lrclib.net/api/get?track_name=$encodedTitle&artist_name=$encodedArtist"
-            val url = URL(apiUrl)
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 4000
-            connection.readTimeout = 4000
-            connection.setRequestProperty("User-Agent", "SpotifyRemoteApp/1.0")
-
-            if (connection.responseCode == 200) {
-                val jsonStr = connection.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(jsonStr)
-                val syncedLyrics = json.optString("syncedLyrics", null)
-                val plainLyrics = json.optString("plainLyrics", null)
-
-                if (!syncedLyrics.isNullOrBlank()) {
-                    Log.d(TAG, "Successfully retrieved Spotify synced lyrics!")
-                    return@withContext syncedLyrics
-                } else if (!plainLyrics.isNullOrBlank()) {
-                    Log.d(TAG, "Successfully retrieved Spotify plain lyrics!")
-                    return@withContext plainLyrics
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error fetching Spotify track lyrics", e)
-        }
-        return@withContext null
+        val query = com.example.api.SongQuery(title, artist, trackId = trackId)
+        com.example.api.LyricsMatching.choose(query,
+            com.example.api.GeminiLyricsService.searchCandidates(query))?.candidate?.rawLyrics
     }
 
     /**

@@ -44,7 +44,8 @@ class SpotifyBroadcastReceiver : BroadcastReceiver() {
                         isPlaying = playing,
                         positionMs = position.toLong(),
                         durationMs = length.toLong(),
-                        packageName = "com.spotify.music"
+                        packageName = "com.spotify.music",
+                        trackId = trackId
                     )
                 }
             }

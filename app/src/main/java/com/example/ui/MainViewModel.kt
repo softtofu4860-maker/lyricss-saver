@@ -4,15 +4,20 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.api.GeminiLyricsService
+import com.example.api.LyricsMatching
 import com.example.data.CachedLyrics
 import com.example.data.LyricLine
+import com.example.data.LyricsIdentity
 import com.example.data.LyricsRepository
 import com.example.service.MediaStateHolder
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.Types
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 
 sealed interface LyricsUiState {
     object Empty : LyricsUiState
@@ -26,57 +31,68 @@ sealed interface LyricsUiState {
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-
     private val tag = "MainViewModel"
     private val repository = LyricsRepository(application)
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-
     private val _lyricsState = MutableStateFlow<LyricsUiState>(LyricsUiState.Empty)
     val lyricsState: StateFlow<LyricsUiState> = _lyricsState.asStateFlow()
-
     val mediaState = MediaStateHolder.mediaState
-
     private val _translationMode = MutableStateFlow(com.example.data.TranslationMode.BILINGUAL)
     val translationMode: StateFlow<com.example.data.TranslationMode> = _translationMode.asStateFlow()
 
-    fun setTranslationMode(mode: com.example.data.TranslationMode) {
-        _translationMode.value = mode
-    }
+    fun setTranslationMode(mode: com.example.data.TranslationMode) { _translationMode.value = mode }
 
     fun cycleTranslationMode() {
         val modes = com.example.data.TranslationMode.values()
-        val nextIdx = (modes.indexOf(_translationMode.value) + 1) % modes.size
-        _translationMode.value = modes[nextIdx]
+        _translationMode.value = modes[(modes.indexOf(_translationMode.value) + 1) % modes.size]
     }
 
     val savedLyrics: StateFlow<List<CachedLyrics>> = repository.getAllSavedLyrics()
-        .map { list ->
-            list.filter { !com.example.api.GeminiLyricsService.isFallbackLyrics(it) }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
+        .map { list -> list.filter { !GeminiLyricsService.isFallbackLyrics(it) } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private var lastLoadedSongKey = ""
     private var lastMetadataLyrics: String? = null
+    private var lyricsJob: Job? = null
+
+    // Loading, editing and translation all share one cancellable operation.
+    private fun launchLyricsOperation(block: suspend () -> Unit) {
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(tag, "Lyrics operation failed", e)
+                _lyricsState.value = LyricsUiState.Error(e.message ?: "가사를 불러오지 못했습니다.")
+            }
+        }
+    }
+
+    private fun success(lyrics: CachedLyrics, lines: List<LyricLine> = GeminiLyricsService.parseJsonLyrics(lyrics.lyricsJson)): LyricsUiState.Success {
+        val colors = runCatching {
+            val array = JSONArray(lyrics.hexColorsJson)
+            (0 until array.length()).map { array.getString(it) }
+        }.getOrDefault(listOf("#00FFFF", "#8A2BE2"))
+        return LyricsUiState.Success(lyrics, lines, colors)
+    }
 
     init {
-        // Automatically fetch lyrics when intercepted song changes or metadata lyrics become available
         viewModelScope.launch {
             mediaState.collect { state ->
                 val title = state.title
                 val artist = state.artist
-                val metadataLyrics = state.lyrics
-                if (!title.isNullOrEmpty() && !artist.isNullOrEmpty()) {
-                    val songKey = "${artist.lowercase()}_${title.lowercase()}"
-                    if (songKey != lastLoadedSongKey || (metadataLyrics != null && lastMetadataLyrics == null)) {
+                if (!title.isNullOrBlank() && !artist.isNullOrBlank()) {
+                    val songKey = LyricsIdentity.recordingId(title, artist, state.trackId, state.album, state.durationMs)
+                    val metadataChanged = !state.lyrics.isNullOrBlank() && state.lyrics != lastMetadataLyrics
+                    if (songKey != lastLoadedSongKey || metadataChanged) {
                         lastLoadedSongKey = songKey
-                        lastMetadataLyrics = metadataLyrics
-                        loadLyrics(title, artist, metadataLyrics, state.durationMs)
+                        lastMetadataLyrics = state.lyrics
+                        loadLyrics(title, artist, state.lyrics, state.durationMs, forceRefresh = metadataChanged,
+                            album = state.album, trackId = state.trackId)
                     }
                 } else {
+                    lyricsJob?.cancel()
                     _lyricsState.value = LyricsUiState.Empty
                     lastLoadedSongKey = ""
                     lastMetadataLyrics = null
@@ -85,85 +101,54 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun loadLyrics(title: String, artist: String, metadataLyrics: String? = null, durationMs: Long = 0, customQuery: String? = null) {
-        viewModelScope.launch {
+    fun loadLyrics(
+        title: String, artist: String, metadataLyrics: String? = null, durationMs: Long = 0,
+        customQuery: String? = null, forceRefresh: Boolean = false,
+        album: String? = null, trackId: String? = null
+    ) {
+        launchLyricsOperation {
             _lyricsState.value = LyricsUiState.Loading
-            try {
-                Log.d(tag, "Fetching lyrics in ViewModel for: $title by $artist, customQuery: $customQuery")
-                val lyricsData = repository.getLyrics(title, artist, metadataLyrics, durationMs, customQuery)
-                
-                // Parse lines JSON
-                val typeLines = Types.newParameterizedType(List::class.java, LyricLine::class.java)
-                val linesAdapter = moshi.adapter<List<LyricLine>>(typeLines)
-                val lines = linesAdapter.fromJson(lyricsData.lyricsJson) ?: emptyList()
-
-                // Parse colors JSON
-                val typeColors = Types.newParameterizedType(List::class.java, String::class.java)
-                val colorsAdapter = moshi.adapter<List<String>>(typeColors)
-                val colors = colorsAdapter.fromJson(lyricsData.hexColorsJson) ?: listOf("#00FFFF", "#8A2BE2")
-
-                _lyricsState.value = LyricsUiState.Success(lyricsData, lines, colors)
-            } catch (e: Exception) {
-                Log.e(tag, "Error loading lyrics in ViewModel", e)
-                _lyricsState.value = LyricsUiState.Error("Error: ${e.message}")
-            }
+            val lyrics = repository.getLyrics(title, artist, metadataLyrics, durationMs, customQuery, forceRefresh, album, trackId)
+            currentCoroutineContext().ensureActive()
+            _lyricsState.value = success(lyrics)
         }
     }
 
-    fun saveManualLyrics(title: String, artist: String, editedLines: List<LyricLine>) {
-        viewModelScope.launch {
-            try {
-                val songId = com.example.api.GeminiLyricsService.generateSongId(title, artist)
-                val database = com.example.data.LyricsDatabase.getDatabase(getApplication())
-                val dao = database.lyricsDao()
-                
-                // Retrieve existing entry to preserve other fields like bpm, colors, genre
-                val existing = dao.getLyricsById(songId)
-                
-                val typeLines = Types.newParameterizedType(List::class.java, LyricLine::class.java)
-                val linesAdapter = moshi.adapter<List<LyricLine>>(typeLines)
-                val newLyricsJson = linesAdapter.toJson(editedLines)
-                
-                val updatedLyrics = if (existing != null) {
-                    existing.copy(
-                        lyricsJson = newLyricsJson,
-                        timestamp = System.currentTimeMillis()
-                    )
-                } else {
-                    val colorsAdapter = moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
-                    val defaultColors = listOf("#00FFFF", "#8A2BE2")
-                    CachedLyrics(
-                        id = songId,
-                        title = title,
-                        artist = artist,
-                        lyricsJson = newLyricsJson,
-                        bpm = 100,
-                        hexColorsJson = colorsAdapter.toJson(defaultColors),
-                        genre = "Manual Edit",
-                        timestamp = System.currentTimeMillis()
-                    )
-                }
-                
-                dao.insertLyrics(updatedLyrics)
-                
-                // Update active state
-                val colorsAdapter = moshi.adapter<List<String>>(Types.newParameterizedType(List::class.java, String::class.java))
-                val colors = try { colorsAdapter.fromJson(updatedLyrics.hexColorsJson) ?: listOf("#00FFFF", "#8A2BE2") } catch (e: Exception) { listOf("#00FFFF", "#8A2BE2") }
-                
-                _lyricsState.value = LyricsUiState.Success(updatedLyrics, editedLines, colors)
-            } catch (e: Exception) {
-                Log.e(tag, "Error saving manual lyrics", e)
-            }
+    fun saveManualLyrics(title: String, artist: String, editedLines: List<LyricLine>,
+        selection: com.example.api.LyricsSelection? = null) {
+        val playing = mediaState.value
+        val original = (_lyricsState.value as? LyricsUiState.Success)?.cachedLyrics
+            ?.takeIf { LyricsIdentity.matches(it, title, artist) }
+        launchLyricsOperation {
+            val updated = (original ?: CachedLyrics(
+                id = LyricsIdentity.recordingId(title, artist, playing.trackId, playing.album, playing.durationMs),
+                title = title, artist = artist, lyricsJson = "",
+                trackId = playing.trackId, album = playing.album, durationMs = playing.durationMs
+            )).copy(
+                id = LyricsIdentity.recordingId(title, artist, playing.trackId, playing.album, playing.durationMs),
+                trackId = playing.trackId, album = playing.album, durationMs = playing.durationMs,
+                provider = selection?.provider ?: "manual", providerId = selection?.providerId,
+                synced = selection?.synced ?: (editedLines.any { it.timeSec > 0 }),
+                manuallySelected = true,
+                lyricsJson = GeminiLyricsService.lyricAdapter.toJson(editedLines),
+                timestamp = System.currentTimeMillis()
+            )
+            repository.saveLyrics(updated)
+            currentCoroutineContext().ensureActive()
+            _lyricsState.value = success(updated, editedLines)
         }
     }
 
     fun clearDatabaseCache() {
-        viewModelScope.launch {
+        launchLyricsOperation {
             repository.clearCache()
-            // Force reload current song if active
             val current = mediaState.value
-            if (!current.title.isNullOrEmpty() && !current.artist.isNullOrEmpty()) {
-                loadLyrics(current.title, current.artist, current.lyrics, current.durationMs)
+            if (!current.title.isNullOrBlank() && !current.artist.isNullOrBlank()) {
+                _lyricsState.value = LyricsUiState.Loading
+                val lyrics = repository.getLyrics(current.title, current.artist, current.lyrics, current.durationMs, forceRefresh = true,
+                    album = current.album, trackId = current.trackId)
+                currentCoroutineContext().ensureActive()
+                _lyricsState.value = success(lyrics)
             } else {
                 _lyricsState.value = LyricsUiState.Empty
             }
@@ -171,81 +156,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteSavedSong(songId: String) {
-        viewModelScope.launch {
-            repository.deleteLyrics(songId)
-        }
+        viewModelScope.launch { repository.deleteLyrics(songId) }
     }
 
     fun loadLyricsFromLibrary(cachedLyrics: CachedLyrics) {
-        viewModelScope.launch {
-            _lyricsState.value = LyricsUiState.Loading
-            try {
-                // Parse lines JSON
-                val typeLines = Types.newParameterizedType(List::class.java, LyricLine::class.java)
-                val linesAdapter = moshi.adapter<List<LyricLine>>(typeLines)
-                val lines = linesAdapter.fromJson(cachedLyrics.lyricsJson) ?: emptyList()
-
-                // Parse colors JSON
-                val typeColors = Types.newParameterizedType(List::class.java, String::class.java)
-                val colorsAdapter = moshi.adapter<List<String>>(typeColors)
-                val colors = colorsAdapter.fromJson(cachedLyrics.hexColorsJson) ?: listOf("#00FFFF", "#8A2BE2")
-
-                _lyricsState.value = LyricsUiState.Success(cachedLyrics, lines, colors)
-                
-                // Update mediaState so the player card matches this selected song!
-                com.example.service.MediaStateHolder.updateState(
-                    title = cachedLyrics.title,
-                    artist = cachedLyrics.artist,
-                    album = "저장된 라이브러리",
-                    isPlaying = false,
-                    positionMs = 0L,
-                    durationMs = if (lines.isNotEmpty()) (lines.last().timeSec * 1000).toLong() + 5000L else 180000L,
-                    packageName = "com.example.library", // Indicate loaded from library
-                    lyrics = null
-                )
-            } catch (e: Exception) {
-                Log.e(tag, "Error loading lyrics from library", e)
-                _lyricsState.value = LyricsUiState.Error("Error: ${e.message}")
-            }
+        launchLyricsOperation {
+            val state = success(cachedLyrics)
+            // Prevent the media collector from starting an automatic lookup for this library selection.
+            val libraryDuration = cachedLyrics.durationMs.takeIf { it > 0 }
+                ?: state.parsedLines.lastOrNull()?.let { (it.timeSec * 1000).toLong() + 5000L } ?: 180000L
+            lastLoadedSongKey = LyricsIdentity.recordingId(cachedLyrics.title, cachedLyrics.artist,
+                cachedLyrics.trackId, cachedLyrics.album, libraryDuration)
+            lastMetadataLyrics = null
+            MediaStateHolder.updateState(
+                title = cachedLyrics.title, artist = cachedLyrics.artist, album = cachedLyrics.album,
+                isPlaying = false, positionMs = 0L,
+                durationMs = libraryDuration,
+                trackId = cachedLyrics.trackId,
+                packageName = "com.example.library", lyrics = null
+            )
+            _lyricsState.value = state
         }
     }
 
     fun translateActiveLyrics() {
-        val currentState = _lyricsState.value
-        if (currentState !is LyricsUiState.Success) return
-
-        val originalLyrics = currentState.cachedLyrics
-        val originalLines = currentState.parsedLines
-        val originalColors = currentState.vibeColors
-
-        // Convert parsedLines to raw LRC format
-        val rawLrcText = originalLines.joinToString("\n") { line ->
-            val totalSec = line.timeSec
-            val min = (totalSec / 60).toInt()
-            val sec = (totalSec % 60).toInt()
-            val ms = ((totalSec % 1) * 100).toInt()
-            java.util.Locale.US.let { locale ->
-                String.format(locale, "[%02d:%02d.%02d] %s", min, sec, ms, line.text)
-            }
+        val original = _lyricsState.value as? LyricsUiState.Success ?: return
+        val rawLrcText = original.parsedLines.joinToString("\n") { line ->
+            val millis = (line.timeSec * 1000).toLong()
+            String.format(java.util.Locale.US, "[%02d:%02d.%03d]%s",
+                millis / 60000, (millis / 1000) % 60, millis % 1000, line.text)
         }
-
-        viewModelScope.launch {
+        launchLyricsOperation {
             _lyricsState.value = LyricsUiState.Loading
             try {
-                val translatedRaw = com.example.api.GeminiLyricsService.translateLyricsViaGemini(rawLrcText, getApplication())
-                val parsedLines = com.example.api.GeminiLyricsService.parseLrcLyrics(translatedRaw, 0L)
-                
-                if (parsedLines.isNotEmpty()) {
-                    val title = originalLyrics.title
-                    val artist = originalLyrics.artist
-                    saveManualLyrics(title, artist, parsedLines)
-                } else {
-                    _lyricsState.value = LyricsUiState.Success(originalLyrics, originalLines, originalColors)
-                }
+                val translated = GeminiLyricsService.translateLyricsViaGemini(rawLrcText, getApplication())
+                val translatedLines = LyricsMatching.parseTranslation(translated)
+                val merged = LyricsMatching.mergeTranslation(original.parsedLines, translatedLines)
+                    ?: error("번역의 가사 줄 수 또는 시간이 원문과 다릅니다. 다시 시도해 주세요.")
+                val updated = original.cachedLyrics.copy(
+                    id = LyricsIdentity.recordingId(original.cachedLyrics.title, original.cachedLyrics.artist,
+                        original.cachedLyrics.trackId, original.cachedLyrics.album, original.cachedLyrics.durationMs),
+                    lyricsJson = GeminiLyricsService.lyricAdapter.toJson(merged),
+                    timestamp = System.currentTimeMillis()
+                )
+                currentCoroutineContext().ensureActive()
+                repository.saveLyrics(updated)
+                currentCoroutineContext().ensureActive()
+                _lyricsState.value = success(updated, merged)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e(tag, "Gemini translation failed", e)
-                _lyricsState.value = LyricsUiState.Success(originalLyrics, originalLines, originalColors)
+                // Preserve the visible original and cached lyrics when translation fails.
+                _lyricsState.value = original
+                _translationError.value = e.message ?: "번역하지 못했습니다."
             }
         }
     }
+
+    private val _translationError = MutableStateFlow<String?>(null)
+    val translationError: StateFlow<String?> = _translationError.asStateFlow()
+    fun dismissTranslationError() { _translationError.value = null }
 }

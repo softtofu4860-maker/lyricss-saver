@@ -141,6 +141,7 @@ object SampleDataProvider {
 
         return listOf(
             CachedLyrics(
+                synced = true,
                 id = GeminiLyricsService.generateSongId("Ditto", "NewJeans"),
                 title = "Ditto",
                 artist = "NewJeans",
@@ -149,6 +150,7 @@ object SampleDataProvider {
                 hexColorsJson = "[\"#FF3B82F6\", \"#FF1E1B4B\", \"#FF06B6D4\", \"#FF4C1D95\"]"
             ),
             CachedLyrics(
+                synced = true,
                 id = GeminiLyricsService.generateSongId("Love wins all", "IU"),
                 title = "Love wins all",
                 artist = "IU",
@@ -157,6 +159,7 @@ object SampleDataProvider {
                 hexColorsJson = "[\"#FFBE185D\", \"#FF4C0519\", \"#FF1E1B4B\", \"#FF831843\"]"
             ),
             CachedLyrics(
+                synced = true,
                 id = GeminiLyricsService.generateSongId("Cruel Summer", "Taylor Swift"),
                 title = "Cruel Summer",
                 artist = "Taylor Swift",
@@ -165,6 +168,7 @@ object SampleDataProvider {
                 hexColorsJson = "[\"#FFF59E0B\", \"#FFDC2626\", \"#FF7C3AED\", \"#FF0284C7\"]"
             ),
             CachedLyrics(
+                synced = true,
                 id = GeminiLyricsService.generateSongId("BIRDS OF A FEATHER", "Billie Eilish"),
                 title = "BIRDS OF A FEATHER",
                 artist = "Billie Eilish",

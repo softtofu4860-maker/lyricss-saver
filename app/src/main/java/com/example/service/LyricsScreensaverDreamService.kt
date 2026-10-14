@@ -121,6 +121,8 @@ private fun DreamScreensaverScreen(
 ) {
     val mediaState by MediaStateHolder.mediaState.collectAsState()
     var lyrics by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
+    var lyricsSynced by remember { mutableStateOf(false) }
+    val correctionScope = androidx.compose.runtime.rememberCoroutineScope()
     var auraColors by remember { mutableStateOf<List<Color>>(emptyList()) }
     var showCorrectionDialog by remember { mutableStateOf(false) }
 
@@ -134,15 +136,19 @@ private fun DreamScreensaverScreen(
     }
 
     // 곡이 바뀌면 가사 로드
-    LaunchedEffect(mediaState.title, mediaState.artist) {
+    LaunchedEffect(mediaState.title, mediaState.artist, mediaState.trackId, mediaState.album, mediaState.durationMs, mediaState.lyrics) {
+        lyrics = emptyList()
+        lyricsSynced = false
         val title = mediaState.title
         val artist = mediaState.artist
         if (!title.isNullOrBlank() && !artist.isNullOrBlank()) {
             try {
-                val cached = repository.getLyrics(title, artist, durationMs = mediaState.durationMs)
+                val cached = repository.getLyrics(title, artist, mediaState.lyrics, durationMs = mediaState.durationMs,
+                    album = mediaState.album, trackId = mediaState.trackId)
                 lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
+                lyricsSynced = cached.synced
                 auraColors = parseAuraColors(cached.hexColorsJson)
-            } catch (e: Exception) {}
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {}
         }
     }
 
@@ -150,6 +156,7 @@ private fun DreamScreensaverScreen(
         AppleMusicScreensaverView(
             mediaState = mediaState,
             lyricsLines = lyrics,
+            lyricsSynced = lyricsSynced,
             onCloseClicked = onWakeUp
         )
 
@@ -163,31 +170,37 @@ private fun DreamScreensaverScreen(
                 onReSearchRequested = { q ->
                     val title = mediaState.title ?: ""
                     val artist = mediaState.artist ?: ""
-                    CoroutineScope(Dispatchers.IO).launch {
+                    correctionScope.launch {
                         try {
                             val cached = repository.getLyrics(
                                 title = title,
                                 artist = artist,
                                 durationMs = mediaState.durationMs,
-                                customQuery = q
+                                customQuery = q,
+                                album = mediaState.album, trackId = mediaState.trackId
                             )
                             lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
+                lyricsSynced = cached.synced
                             auraColors = parseAuraColors(cached.hexColorsJson)
                         } catch (_: Exception) {}
                     }
                 },
-                onSaveManualLyrics = { newLines ->
+                onSaveManualLyrics = { newLines, selection ->
+                    lyricsSynced = selection?.synced ?: newLines.any { it.timeSec > 0 }
                     lyrics = newLines
                     val title = mediaState.title ?: ""
                     val artist = mediaState.artist ?: ""
-                    CoroutineScope(Dispatchers.IO).launch {
+                    correctionScope.launch {
                         repository.saveLyrics(
                             com.example.data.CachedLyrics(
                                 id = GeminiLyricsService.generateSongId(title, artist),
                                 title = title,
                                 artist = artist,
                                 lyricsJson = GeminiLyricsService.lyricAdapter.toJson(newLines),
-                                hexColorsJson = GeminiLyricsService.getElegantAuraColors(title, artist)
+                                hexColorsJson = GeminiLyricsService.getElegantAuraColors(title, artist),
+                                trackId = mediaState.trackId, album = mediaState.album, durationMs = mediaState.durationMs,
+                                provider = selection?.provider ?: "manual", providerId = selection?.providerId,
+                                synced = lyricsSynced, manuallySelected = true
                             )
                         )
                     }

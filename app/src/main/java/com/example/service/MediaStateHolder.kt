@@ -15,7 +15,8 @@ data class MediaState(
     val lastUpdateTime: Long = 0, // System.currentTimeMillis()
     val speed: Float = 1.0f,
     val lyrics: String? = null,
-    val albumArt: android.graphics.Bitmap? = null
+    val albumArt: android.graphics.Bitmap? = null,
+    val trackId: String? = null
 ) {
     fun getCurrentPositionMs(): Long {
         if (!isPlaying) return positionMs
@@ -39,7 +40,8 @@ object MediaStateHolder {
         packageName: String?,
         speed: Float = 1.0f,
         lyrics: String? = null,
-        albumArt: android.graphics.Bitmap? = null
+        albumArt: android.graphics.Bitmap? = null,
+        trackId: String? = null
     ) {
         val oldState = _mediaState.value
         if (oldState.albumArt != null && oldState.albumArt != albumArt) {
@@ -58,7 +60,10 @@ object MediaStateHolder {
             lastUpdateTime = System.currentTimeMillis(),
             speed = speed,
             lyrics = lyrics,
-            albumArt = albumArt
+            albumArt = albumArt,
+            trackId = com.example.data.LyricsIdentity.spotifyTrackId(trackId)
+                ?: oldState.trackId.takeIf { title == oldState.title && artist == oldState.artist &&
+                    album == oldState.album && packageName == oldState.packageName }
         )
     }
 

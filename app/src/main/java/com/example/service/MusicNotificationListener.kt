@@ -173,7 +173,8 @@ class MusicNotificationListener : NotificationListenerService() {
             packageName = packageName,
             speed = speed,
             lyrics = lyrics,
-            albumArt = albumArt
+            albumArt = albumArt,
+            trackId = if (packageName == "com.spotify.music") metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_ID) else null
         )
     }
 

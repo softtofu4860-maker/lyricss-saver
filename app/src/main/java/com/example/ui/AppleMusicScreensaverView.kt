@@ -98,7 +98,8 @@ fun AppleMusicScreensaverView(
     onOpenDashboard: (() -> Unit)? = null,
     isPermissionGranted: Boolean = true,
     onRequestPermission: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    lyricsSynced: Boolean = lyricsLines.any { it.timeSec > 0 }
 ) {
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -201,7 +202,8 @@ fun AppleMusicScreensaverView(
 
     var syncOffsetSec by remember { mutableStateOf(0.0f) }
 
-    val lyricsActiveIndex = remember(lyricsLines, currentPositionMs, syncOffsetSec) {
+    val lyricsActiveIndex = remember(lyricsLines, currentPositionMs, syncOffsetSec, lyricsSynced) {
+        if (!lyricsSynced) return@remember -1
         val currentSec = (currentPositionMs / 1000f) + 0.35f + syncOffsetSec
         val idx = lyricsLines.indexOfLast { currentSec >= it.timeSec }
         if (idx == -1) -1 else idx

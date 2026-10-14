@@ -83,12 +83,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val title = state.title
                 val artist = state.artist
                 if (!title.isNullOrBlank() && !artist.isNullOrBlank()) {
-                    val songKey = LyricsIdentity.songId(title, artist)
+                    val songKey = LyricsIdentity.recordingId(title, artist, state.trackId, state.album, state.durationMs)
                     val metadataChanged = !state.lyrics.isNullOrBlank() && state.lyrics != lastMetadataLyrics
                     if (songKey != lastLoadedSongKey || metadataChanged) {
                         lastLoadedSongKey = songKey
                         lastMetadataLyrics = state.lyrics
-                        loadLyrics(title, artist, state.lyrics, state.durationMs, forceRefresh = metadataChanged)
+                        loadLyrics(title, artist, state.lyrics, state.durationMs, forceRefresh = metadataChanged,
+                            album = state.album, trackId = state.trackId)
                     }
                 } else {
                     lyricsJob?.cancel()
@@ -102,24 +103,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadLyrics(
         title: String, artist: String, metadataLyrics: String? = null, durationMs: Long = 0,
-        customQuery: String? = null, forceRefresh: Boolean = false
+        customQuery: String? = null, forceRefresh: Boolean = false,
+        album: String? = null, trackId: String? = null
     ) {
         launchLyricsOperation {
             _lyricsState.value = LyricsUiState.Loading
-            val lyrics = repository.getLyrics(title, artist, metadataLyrics, durationMs, customQuery, forceRefresh)
+            val lyrics = repository.getLyrics(title, artist, metadataLyrics, durationMs, customQuery, forceRefresh, album, trackId)
             currentCoroutineContext().ensureActive()
             _lyricsState.value = success(lyrics)
         }
     }
 
-    fun saveManualLyrics(title: String, artist: String, editedLines: List<LyricLine>) {
+    fun saveManualLyrics(title: String, artist: String, editedLines: List<LyricLine>,
+        selection: com.example.api.LyricsSelection? = null) {
+        val playing = mediaState.value
         val original = (_lyricsState.value as? LyricsUiState.Success)?.cachedLyrics
             ?.takeIf { LyricsIdentity.matches(it, title, artist) }
         launchLyricsOperation {
             val updated = (original ?: CachedLyrics(
-                id = LyricsIdentity.songId(title, artist), title = title, artist = artist, lyricsJson = ""
+                id = LyricsIdentity.recordingId(title, artist, playing.trackId, playing.album, playing.durationMs),
+                title = title, artist = artist, lyricsJson = "",
+                trackId = playing.trackId, album = playing.album, durationMs = playing.durationMs
             )).copy(
-                id = LyricsIdentity.songId(title, artist),
+                id = LyricsIdentity.recordingId(title, artist, playing.trackId, playing.album, playing.durationMs),
+                trackId = playing.trackId, album = playing.album, durationMs = playing.durationMs,
+                provider = selection?.provider ?: "manual", providerId = selection?.providerId,
+                synced = selection?.synced ?: (editedLines.any { it.timeSec > 0 }),
+                manuallySelected = true,
                 lyricsJson = GeminiLyricsService.lyricAdapter.toJson(editedLines),
                 timestamp = System.currentTimeMillis()
             )
@@ -135,7 +145,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val current = mediaState.value
             if (!current.title.isNullOrBlank() && !current.artist.isNullOrBlank()) {
                 _lyricsState.value = LyricsUiState.Loading
-                val lyrics = repository.getLyrics(current.title, current.artist, current.lyrics, current.durationMs, forceRefresh = true)
+                val lyrics = repository.getLyrics(current.title, current.artist, current.lyrics, current.durationMs, forceRefresh = true,
+                    album = current.album, trackId = current.trackId)
                 currentCoroutineContext().ensureActive()
                 _lyricsState.value = success(lyrics)
             } else {
@@ -152,12 +163,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         launchLyricsOperation {
             val state = success(cachedLyrics)
             // Prevent the media collector from starting an automatic lookup for this library selection.
-            lastLoadedSongKey = LyricsIdentity.songId(cachedLyrics.title, cachedLyrics.artist)
+            val libraryDuration = cachedLyrics.durationMs.takeIf { it > 0 }
+                ?: state.parsedLines.lastOrNull()?.let { (it.timeSec * 1000).toLong() + 5000L } ?: 180000L
+            lastLoadedSongKey = LyricsIdentity.recordingId(cachedLyrics.title, cachedLyrics.artist,
+                cachedLyrics.trackId, cachedLyrics.album, libraryDuration)
             lastMetadataLyrics = null
             MediaStateHolder.updateState(
-                title = cachedLyrics.title, artist = cachedLyrics.artist, album = "저장된 라이브러리",
+                title = cachedLyrics.title, artist = cachedLyrics.artist, album = cachedLyrics.album,
                 isPlaying = false, positionMs = 0L,
-                durationMs = state.parsedLines.lastOrNull()?.let { (it.timeSec * 1000).toLong() + 5000L } ?: 180000L,
+                durationMs = libraryDuration,
+                trackId = cachedLyrics.trackId,
                 packageName = "com.example.library", lyrics = null
             )
             _lyricsState.value = state
@@ -179,7 +194,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val merged = LyricsMatching.mergeTranslation(original.parsedLines, translatedLines)
                     ?: error("번역의 가사 줄 수 또는 시간이 원문과 다릅니다. 다시 시도해 주세요.")
                 val updated = original.cachedLyrics.copy(
-                    id = LyricsIdentity.songId(original.cachedLyrics.title, original.cachedLyrics.artist),
+                    id = LyricsIdentity.recordingId(original.cachedLyrics.title, original.cachedLyrics.artist,
+                        original.cachedLyrics.trackId, original.cachedLyrics.album, original.cachedLyrics.durationMs),
                     lyricsJson = GeminiLyricsService.lyricAdapter.toJson(merged),
                     timestamp = System.currentTimeMillis()
                 )

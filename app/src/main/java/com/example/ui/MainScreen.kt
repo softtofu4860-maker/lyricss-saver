@@ -186,6 +186,7 @@ fun MainScreen(
                     ImmersiveScreensaverView(
                         mediaState = mediaState,
                         lyricsLines = parsedLines,
+                        lyricsSynced = (lyricsState as? LyricsUiState.Success)?.cachedLyrics?.synced == true,
                         vibeColors = themeColors,
                         bpm = activeBpm,
                         visualizerMode = selectedVisualizerMode,
@@ -230,14 +231,17 @@ fun MainScreen(
                                 artist = mediaState.artist ?: "",
                                 metadataLyrics = mediaState.lyrics,
                                 durationMs = mediaState.durationMs,
-                                customQuery = query
+                                customQuery = query,
+                                album = mediaState.album,
+                                trackId = mediaState.trackId
                             )
                         },
-                        onSaveManualLyrics = { lines ->
+                        onSaveManualLyrics = { lines, selection ->
                             viewModel.saveManualLyrics(
                                 title = mediaState.title ?: "",
                                 artist = mediaState.artist ?: "",
-                                editedLines = lines
+                                editedLines = lines,
+                                selection = selection
                             )
                         },
                         onTranslateRequested = {
@@ -451,7 +455,7 @@ fun DashboardScreen(
     onLaunchScreensaver: () -> Unit,
     onClearCacheClicked: () -> Unit,
     onReSearchRequested: (String) -> Unit,
-    onSaveManualLyrics: (List<LyricLine>) -> Unit,
+    onSaveManualLyrics: (List<LyricLine>, com.example.api.LyricsSelection?) -> Unit,
     onTranslateRequested: () -> Unit
 ) {
     val context = LocalContext.current
@@ -860,14 +864,15 @@ fun DashboardScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "실시간 싱크로 가사 준비 완료 (${lyricsState.parsedLines.size} 소절)",
+                                        text = if (lyricsState.cachedLyrics.synced) "싱크 가사 준비 완료 (${lyricsState.parsedLines.size} 소절)"
+                                            else "일반 가사 · 자동 싱크 없음 (${lyricsState.parsedLines.size} 소절)",
                                         fontSize = 13.sp,
                                         color = Color(0xFF4ADE80),
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
                                 Text(
-                                    text = "곡 템포: ${lyricsState.cachedLyrics.bpm} BPM | 장르: ${lyricsState.cachedLyrics.genre ?: "일반"}",
+                                    text = "가사 출처: ${lyricsState.cachedLyrics.provider ?: "저장된 가사"}",
                                     fontSize = 12.sp,
                                     color = Color.White.copy(alpha = 0.5f)
                                 )
@@ -1773,7 +1778,8 @@ fun ImmersiveScreensaverView(
     onModeChanged: (VisualizerMode) -> Unit,
     onSelectSampleSong: ((com.example.data.CachedLyrics) -> Unit)? = null,
     isPermissionGranted: Boolean = true,
-    onRequestPermission: (() -> Unit)? = null
+    onRequestPermission: (() -> Unit)? = null,
+    lyricsSynced: Boolean = lyricsLines.any { it.timeSec > 0 }
 ) {
     val context = LocalContext.current
     val rawPrimary = vibeColors.getOrElse(0) { Color(0xFF38BDF8) }
@@ -1831,7 +1837,8 @@ fun ImmersiveScreensaverView(
     
     val calibratedPositionMs = currentPositionMs + syncOffsetMs
 
-    val lyricsActiveIndex = remember(lyricsLines, calibratedPositionMs) {
+    val lyricsActiveIndex = remember(lyricsLines, calibratedPositionMs, lyricsSynced) {
+        if (!lyricsSynced) return@remember -1
         val currentSec = (calibratedPositionMs / 1000f) + 0.40f
         val idx = lyricsLines.indexOfLast { currentSec >= it.timeSec }
         if (idx == -1) -1 else idx
@@ -1931,6 +1938,7 @@ fun ImmersiveScreensaverView(
         AppleMusicScreensaverView(
             mediaState = mediaState,
             lyricsLines = lyricsLines,
+            lyricsSynced = lyricsSynced,
             onCloseClicked = onCloseClicked,
             onSwitchTheme = {
                 currentTheme = ScreensaverTheme.CLASSIC_NEON
@@ -2146,7 +2154,7 @@ fun ImmersiveScreensaverView(
                                         activeIndex = lyricsActiveIndex,
                                         activeColor = activeLyricColor,
                                         onLineClicked = { seekPosMs ->
-                                            try {
+                                            if (lyricsSynced) try {
                                                 val controller = MusicNotificationListener.activeController
                                                 controller?.transportControls?.seekTo(seekPosMs)
                                                 if (!mediaState.isPlaying) {
@@ -2205,7 +2213,7 @@ fun ImmersiveScreensaverView(
                                     activeIndex = lyricsActiveIndex,
                                     activeColor = activeLyricColor,
                                     onLineClicked = { seekPosMs ->
-                                        try {
+                                        if (lyricsSynced) try {
                                             val controller = MusicNotificationListener.activeController
                                             controller?.transportControls?.seekTo(seekPosMs)
                                             if (!mediaState.isPlaying) {
@@ -2382,7 +2390,7 @@ fun ImmersiveScreensaverView(
                                     activeIndex = lyricsActiveIndex,
                                     activeColor = activeLyricColor,
                                     onLineClicked = { seekPosMs ->
-                                        try {
+                                        if (lyricsSynced) try {
                                             val controller = MusicNotificationListener.activeController
                                             controller?.transportControls?.seekTo(seekPosMs)
                                             if (!mediaState.isPlaying) {
@@ -2559,7 +2567,7 @@ fun ImmersiveScreensaverView(
                                 activeIndex = lyricsActiveIndex,
                                 activeColor = activeLyricColor,
                                 onLineClicked = { seekPosMs ->
-                                    try {
+                                    if (lyricsSynced) try {
                                         val controller = MusicNotificationListener.activeController
                                         controller?.transportControls?.seekTo(seekPosMs)
                                         if (!mediaState.isPlaying) {
@@ -3423,7 +3431,7 @@ fun LyricsCorrectionDialog(
     durationMs: Long,
     onDismiss: () -> Unit,
     onReSearchRequested: (String) -> Unit,
-    onSaveManualLyrics: (List<LyricLine>) -> Unit
+    onSaveManualLyrics: (List<LyricLine>, com.example.api.LyricsSelection?) -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) } // 0: AI Re-search, 1: DB Search, 2: Manual Edit
     var customQueryText by remember { mutableStateOf("") }
@@ -3746,10 +3754,14 @@ fun LyricsCorrectionDialog(
                                                             scope.launch {
                                                                 try {
                                                                     val artistName = song.artists?.joinToString(", ") { it.name ?: "" } ?: ""
-                                                                    val lyrics = com.example.api.GeminiLyricsService.fetchLrcmuxLyrics(song.name ?: "", artistName)
-                                                                    netEaseLyricsPreview = lyrics ?: "[00:00.00] 이 곡은 등록된 가사가 없거나 빈 내용입니다."
+                                                                    val lyrics = song.id?.let { com.example.api.GeminiLyricsService.fetchNetEaseLyrics(it)?.lrc }
+                                                                    if (selectedNetEaseResult?.id != song.id) return@launch
+                                                                    netEaseLyricsPreview = lyrics
+                                                                    if (lyrics.isNullOrBlank()) searchError = "이 곡에 등록된 가사가 없습니다."
+                                                                } catch (e: kotlinx.coroutines.CancellationException) { throw e
                                                                 } catch (e: Exception) {
-                                                                    netEaseLyricsPreview = "[00:00.00] 가사 로드 실패: ${e.message}"
+                                                                    netEaseLyricsPreview = null
+                                                                    searchError = "가사를 불러오지 못했습니다."
                                                                 } finally {
                                                                     isSearching = false
                                                                 }
@@ -3913,7 +3925,8 @@ fun LyricsCorrectionDialog(
         },
         confirmButton = {
             if (selectedTab == 0) {
-                val isSelectionValid = if (searchSource == 0) selectedLrclibResult != null else (selectedNetEaseResult != null && !netEaseLyricsPreview.isNullOrBlank())
+                val isSelectionValid = if (searchSource == 0)
+                    !(selectedLrclibResult?.syncedLyrics ?: selectedLrclibResult?.plainLyrics).isNullOrBlank() else (selectedNetEaseResult != null && !netEaseLyricsPreview.isNullOrBlank())
                 Button(
                     onClick = {
                         if (searchSource == 0) {
@@ -3921,7 +3934,9 @@ fun LyricsCorrectionDialog(
                             if (selected != null) {
                                 val rawLyrics = selected.syncedLyrics ?: selected.plainLyrics ?: ""
                                 val parsed = com.example.api.GeminiLyricsService.parseLrcLyrics(rawLyrics, durationMs)
-                                onSaveManualLyrics(parsed)
+                                onSaveManualLyrics(parsed, com.example.api.LyricsSelection(
+                                    "lrclib", selected.id?.toString(),
+                                    com.example.api.LrcParser.hasValidSync(rawLyrics, durationMs)))
                                 onDismiss()
                             }
                         } else {
@@ -3929,7 +3944,9 @@ fun LyricsCorrectionDialog(
                             val rawLyrics = netEaseLyricsPreview ?: ""
                             if (selected != null && rawLyrics.isNotBlank()) {
                                 val parsed = com.example.api.GeminiLyricsService.parseLrcLyrics(rawLyrics, durationMs)
-                                onSaveManualLyrics(parsed)
+                                onSaveManualLyrics(parsed, com.example.api.LyricsSelection(
+                                    "netease", selected.id?.toString(),
+                                    com.example.api.LrcParser.hasValidSync(rawLyrics, durationMs)))
                                 onDismiss()
                             }
                         }
@@ -3960,7 +3977,7 @@ fun LyricsCorrectionDialog(
                         if (parsed.isEmpty() && lrcEditText.trim().isNotEmpty()) {
                             parseError = "올바른 LRC 형식([00:00] 가사)이거나 일반 줄바꿈 가사여야 합니다."
                         } else {
-                            onSaveManualLyrics(parsed)
+                            onSaveManualLyrics(parsed, null)
                             onDismiss()
                         }
                     },

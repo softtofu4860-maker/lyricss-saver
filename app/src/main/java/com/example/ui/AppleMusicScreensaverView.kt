@@ -7,6 +7,8 @@ import android.view.WindowManager
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,7 +28,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -101,6 +102,8 @@ fun AppleMusicScreensaverView(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val profile = LocalPerformanceMode.current.profile
+    val effectsActive = LocalEffectsActive.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
     var volumeLevel by remember {
@@ -173,36 +176,25 @@ fun AppleMusicScreensaverView(
 
     // Current time and date
     var currentTimeString by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(effectsActive) {
+        if (!effectsActive) return@LaunchedEffect
         val sdf = SimpleDateFormat("a h:mm M월 d일 EEEE", Locale.KOREA)
         while (true) {
             currentTimeString = sdf.format(Date())
-            delay(15000)
+            delay(60000 - System.currentTimeMillis() % 60000)
         }
     }
 
     // Playback state
-    var currentPositionMs by remember { mutableStateOf(mediaState.getCurrentPositionMs()) }
+    var currentPositionMs by rememberPlaybackPosition(mediaState)
     var isShuffle by remember { mutableStateOf(false) }
     var isRepeat by remember { mutableStateOf(false) }
 
-    LaunchedEffect(mediaState.positionMs, mediaState.isPlaying) {
-        currentPositionMs = mediaState.positionMs
-    }
-
-    LaunchedEffect(mediaState.isPlaying) {
-        if (mediaState.isPlaying) {
-            while (true) {
-                currentPositionMs = mediaState.getCurrentPositionMs()
-                delay(200)
-            }
-        }
-    }
-
-    var syncOffsetSec by remember { mutableStateOf(0.0f) }
+    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist)
+    val syncOffsetSec = songSyncOffset.millis / 1000f
 
     val lyricsActiveIndex = remember(lyricsLines, currentPositionMs, syncOffsetSec) {
-        val currentSec = (currentPositionMs / 1000f) + 0.35f + syncOffsetSec
+        val currentSec = (currentPositionMs / 1000f) + syncOffsetSec
         val idx = lyricsLines.indexOfLast { currentSec >= it.timeSec }
         if (idx == -1) -1 else idx
     }
@@ -247,7 +239,8 @@ fun AppleMusicScreensaverView(
 
     // OLED Burn-in Protection Ambient Drift
     var driftStep by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(effectsActive) {
+        if (!effectsActive) return@LaunchedEffect
         while (true) {
             delay(45000)
             driftStep = (driftStep + 1) % 4
@@ -260,7 +253,7 @@ fun AppleMusicScreensaverView(
             2 -> -2f
             else -> 1f
         },
-        animationSpec = tween(durationMillis = 2500),
+        animationSpec = if (profile.richEffects && effectsActive) tween(durationMillis = 2500) else snap(),
         label = "drift_x"
     )
     val driftOffsetY by animateFloatAsState(
@@ -270,7 +263,7 @@ fun AppleMusicScreensaverView(
             2 -> 1f
             else -> 2f
         },
-        animationSpec = tween(durationMillis = 2500),
+        animationSpec = if (profile.richEffects && effectsActive) tween(durationMillis = 2500) else snap(),
         label = "drift_y"
     )
 
@@ -294,77 +287,8 @@ fun AppleMusicScreensaverView(
             .fillMaxSize()
             .background(Color(0xFF090A0F))
     ) {
-        // 1. Organic Fluid Multi-Color Ambient Mesh Blurred Background
-        val albumArtBitmap = remember(mediaState.albumArt) {
-            mediaState.albumArt?.asImageBitmap()
-        }
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            // First Aura Orb (top-left & center)
-            Box(
-                modifier = Modifier
-                    .size(520.dp)
-                    .offset(x = (-80).dp, y = (-60).dp)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                selectedAuraTheme.color1.copy(alpha = 0.55f),
-                                selectedAuraTheme.color3.copy(alpha = 0.28f),
-                                Color.Transparent
-                            )
-                        ),
-                        shape = CircleShape
-                    )
-                    .blur(65.dp)
-            )
-
-            // Second Aura Orb (bottom-right & center-right)
-            Box(
-                modifier = Modifier
-                    .size(560.dp)
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 100.dp, y = 80.dp)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                selectedAuraTheme.color2.copy(alpha = 0.60f),
-                                selectedAuraTheme.color1.copy(alpha = 0.30f),
-                                Color.Transparent
-                            )
-                        ),
-                        shape = CircleShape
-                    )
-                    .blur(70.dp)
-            )
-
-            // Dynamic blur overlay of actual album art if present
-            if (albumArtBitmap != null) {
-                Image(
-                    bitmap = albumArtBitmap,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer { alpha = 0.32f }
-                        .blur(80.dp)
-                )
-            }
-
-            // Darkening vignette for high text contrast
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.42f),
-                                Color.Black.copy(alpha = 0.78f)
-                            )
-                        )
-                    )
-            )
-        }
+        AmbientArtworkBackground(mediaState.albumArt, selectedAuraTheme.color1,
+            selectedAuraTheme.color2, selectedAuraTheme.color3)
 
         // 2. Main Content Container
         Column(
@@ -637,7 +561,7 @@ fun AppleMusicScreensaverView(
                         onTranslationModeChanged = { translationMode = it },
                         mediaState = mediaState,
                         syncOffsetSec = syncOffsetSec,
-                        onSyncOffsetChanged = { syncOffsetSec = it },
+                        onSyncOffsetChanged = { songSyncOffset.set((it * 1000).toLong()) },
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -811,7 +735,7 @@ fun AppleMusicScreensaverView(
                         onTranslationModeChanged = { translationMode = it },
                         mediaState = mediaState,
                         syncOffsetSec = syncOffsetSec,
-                        onSyncOffsetChanged = { syncOffsetSec = it },
+                        onSyncOffsetChanged = { songSyncOffset.set((it * 1000).toLong()) },
                         modifier = Modifier
                             .weight(1.25f)
                             .fillMaxHeight()
@@ -876,7 +800,7 @@ fun AppleMusicScreensaverView(
                             onTranslationModeChanged = { translationMode = it },
                             mediaState = mediaState,
                             syncOffsetSec = syncOffsetSec,
-                            onSyncOffsetChanged = { syncOffsetSec = it },
+                            onSyncOffsetChanged = { songSyncOffset.set((it * 1000).toLong()) },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -1000,9 +924,11 @@ fun AppleMusicScreensaverView(
                 },
                 text = {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        PerformanceModeSettings(Modifier.fillMaxWidth())
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
                         AuraThemePreset.values().forEach { theme ->
                             val isSelected = selectedAuraTheme == theme
                             Row(
@@ -1074,18 +1000,8 @@ fun VinylTurntableDisc(
     isPlaying: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val rotation = remember { Animatable(0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            rotation.animateTo(
-                targetValue = rotation.value + 360f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 9000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart
-                )
-            )
-        }
-    }
+    val profile = LocalPerformanceMode.current.profile
+    val rotation = rememberEffectPhase(isPlaying && profile.richEffects, periodSeconds = 9f)
 
     Box(
         modifier = modifier,
@@ -1096,7 +1012,7 @@ fun VinylTurntableDisc(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    rotationZ = rotation.value
+                    rotationZ = rotation.value * 180f / kotlin.math.PI.toFloat()
                 }
                 .shadow(16.dp, CircleShape)
                 .background(Color(0xFF0D0E13), CircleShape)

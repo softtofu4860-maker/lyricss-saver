@@ -20,6 +20,6 @@ interface LyricsDao {
     @Query("DELETE FROM cached_lyrics WHERE id = :id")
     suspend fun deleteLyricsById(id: String)
 
-    @Query("DELETE FROM cached_lyrics")
-    suspend fun clearAll()
+    @Query("DELETE FROM cached_lyrics WHERE isUserSaved = 0")
+    suspend fun clearAutomaticCache()
 }

@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
 
 object SampleDataProvider {
 
@@ -144,6 +145,7 @@ object SampleDataProvider {
                 id = GeminiLyricsService.generateSongId("Ditto", "NewJeans"),
                 title = "Ditto",
                 artist = "NewJeans",
+                isUserSaved = true,
                 lyricsJson = dittoJson,
                 bpm = 134,
                 hexColorsJson = "[\"#FF3B82F6\", \"#FF1E1B4B\", \"#FF06B6D4\", \"#FF4C1D95\"]"
@@ -152,6 +154,7 @@ object SampleDataProvider {
                 id = GeminiLyricsService.generateSongId("Love wins all", "IU"),
                 title = "Love wins all",
                 artist = "IU",
+                isUserSaved = true,
                 lyricsJson = loveWinsJson,
                 bpm = 85,
                 hexColorsJson = "[\"#FFBE185D\", \"#FF4C0519\", \"#FF1E1B4B\", \"#FF831843\"]"
@@ -160,6 +163,7 @@ object SampleDataProvider {
                 id = GeminiLyricsService.generateSongId("Cruel Summer", "Taylor Swift"),
                 title = "Cruel Summer",
                 artist = "Taylor Swift",
+                isUserSaved = true,
                 lyricsJson = cruelSummerJson,
                 bpm = 170,
                 hexColorsJson = "[\"#FFF59E0B\", \"#FFDC2626\", \"#FF7C3AED\", \"#FF0284C7\"]"
@@ -168,6 +172,7 @@ object SampleDataProvider {
                 id = GeminiLyricsService.generateSongId("BIRDS OF A FEATHER", "Billie Eilish"),
                 title = "BIRDS OF A FEATHER",
                 artist = "Billie Eilish",
+                isUserSaved = true,
                 lyricsJson = birdsJson,
                 bpm = 105,
                 hexColorsJson = "[\"#FF059669\", \"#FF047857\", \"#FF065F46\", \"#FF111827\"]"
@@ -197,15 +202,15 @@ object SampleDataProvider {
             lyrics = null
         )
 
-        // Live playback ticker simulating realistic track playback
         playbackTickerJob = scope.launch {
-            var currentPos = 0L
-            while (currentPos < durationMs) {
-                delay(250)
-                currentPos += 250L
-                MediaStateHolder.setPlaybackPosition(currentPos)
+            MediaStateHolder.mediaState.collectLatest { state ->
+                if (state.packageName == "com.example.sample" && state.title == song.title &&
+                    state.artist == song.artist && state.isPlaying && state.speed > 0f) {
+                    val remaining = (state.durationMs - state.getCurrentPositionMs()).coerceAtLeast(0L)
+                    delay((remaining / state.speed).toLong())
+                    MediaStateHolder.setPlayingState(false)
+                }
             }
-            MediaStateHolder.setPlayingState(false)
         }
     }
 

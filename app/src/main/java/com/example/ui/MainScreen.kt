@@ -66,6 +66,7 @@ import com.example.data.LyricLine
 import com.example.service.MusicNotificationListener
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import java.util.Locale
 
 @Composable
@@ -73,7 +74,10 @@ fun MainScreen(
     viewModel: MainViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val mediaState by viewModel.mediaState.collectAsStateWithLifecycle()
+    val effectsActive = LocalEffectsActive.current
+    val rawMediaState by viewModel.mediaState.collectAsStateWithLifecycle()
+    val artwork = rememberBoundedArtwork(rawMediaState.albumArt, LocalPerformanceMode.current.profile.artworkMaxEdge)
+    val mediaState = remember(rawMediaState, artwork) { rawMediaState.copy(albumArt = artwork) }
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
     val savedLyrics by viewModel.savedLyrics.collectAsStateWithLifecycle()
 
@@ -95,8 +99,8 @@ fun MainScreen(
     }
 
     // Periodically poll for the permission status only if it's currently disabled, stopping completely once enabled!
-    LaunchedEffect(isPermissionEnabled) {
-        if (!isPermissionEnabled) {
+    LaunchedEffect(isPermissionEnabled, effectsActive) {
+        if (!isPermissionEnabled && effectsActive) {
             while (true) {
                 isPermissionEnabled = MusicNotificationListener.isNotificationServiceEnabled(context)
                 delay(4000)
@@ -310,7 +314,7 @@ fun PermissionOnboardingScreen(
                 PermissionFeatureRow(
                     icon = Icons.Rounded.Lyrics,
                     title = "Gemini 가사 동기화",
-                    desc = "재생 중인 곡의 가사를 완벽하게 검색 및 생성하여, 흘러가는 재생 초 단위 진도에 동기화해 줍니다."
+                    desc = "재생 중인 곡의 가사를 검색하고, 등록된 타임스탬프에 맞춰 표시합니다. 일반 가사는 곡 길이를 기준으로 시간을 추정합니다."
                 )
                 PermissionFeatureRow(
                     icon = Icons.Rounded.BubbleChart,
@@ -463,13 +467,16 @@ fun DashboardScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text(
-                    text = "스마트 화면보호기",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White.copy(alpha = 0.8f),
-                    letterSpacing = 1.5.sp
-                )
+                AdminDiagnosticsEntry { entryModifier ->
+                    Text(
+                        text = "스마트 화면보호기",
+                        modifier = entryModifier,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White.copy(alpha = 0.8f),
+                        letterSpacing = 1.5.sp
+                    )
+                }
                 Text(
                     text = "뮤직 시각화 보드",
                     fontSize = 22.sp,
@@ -879,15 +886,13 @@ fun DashboardScreen(
                         }
                     }
 
-                    // Show translation button if the successful lyrics lack Korean characters
-                    val hasKorean = remember(lyricsState) {
-                        if (lyricsState is LyricsUiState.Success) {
-                            lyricsState.parsedLines.any { line -> line.text.any { it in '\uAC00'..'\uD7A3' } }
-                        } else {
-                            true
-                        }
+                    val needsTranslation = remember(lyricsState) {
+                        (lyricsState as? LyricsUiState.Success)?.parsedLines?.any { line ->
+                            line.text.isNotBlank() && line.translation.isNullOrBlank() &&
+                                line.text.none { it in '\uAC00'..'\uD7A3' }
+                        } == true
                     }
-                    if (lyricsState is LyricsUiState.Success && !hasKorean) {
+                    if (needsTranslation) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Button(
                             onClick = onTranslateRequested,
@@ -1033,10 +1038,10 @@ fun DashboardScreen(
                 
                 Text(
                     text = if (isAiMode) {
-                        if (userApiKey.isNotEmpty()) "사용자의 개인 Gemini API 키를 사용하여 전 세계의 어떤 희귀곡이나 최신곡이든 실시간 구글 검색을 통해 100% 매칭된 싱크 가사를 생성합니다."
-                        else "시스템에 빌드된 Gemini API 키를 사용하여 실시간 구글 검색을 통해 싱크 가사를 생성합니다."
+                        if (userApiKey.isNotEmpty()) "가사 검색은 공개 데이터베이스를 사용합니다. 현재 번역 기능은 빌드에 설정된 Gemini API 키를 사용합니다."
+                        else "가사 검색에는 API 키가 필요하지 않습니다. Gemini는 빌드에 설정된 API 키로 가사 번역에 사용됩니다."
                     } else {
-                        "기본적으로 완전 무료 오픈소스 LRCLIB API와 LrcMux 통합 집계 API를 순서대로 자동 검색합니다. 키 없이도 국내외 인기 곡의 가사를 풍부하게 연동합니다."
+                        "LRCLIB와 NetEase에서 제목·아티스트가 일치하는 가사를 검색합니다. 곡에 따라 가사가 없거나 싱크 정보가 없을 수 있습니다."
                     },
                     fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.5f),
@@ -1086,7 +1091,7 @@ fun DashboardScreen(
                         )
                         if (tempKey.isNotEmpty()) {
                             Text(
-                                text = "개인 키가 등록되면 LRCLIB에 없는 노래도 Gemini 2.5 Flash가 실시간 구글 검색을 통해 싱크로 가사를 완벽히 생성합니다.",
+                                text = "개인 키 저장은 지원하지만 현재 번역 요청에는 빌드에 설정된 키가 사용됩니다. AI가 누락된 가사나 정확한 싱크를 생성하는 기능은 제공하지 않습니다.",
                                 fontSize = 11.sp,
                                 color = Color.White.copy(alpha = 0.7f),
                                 lineHeight = 15.sp
@@ -1222,7 +1227,7 @@ fun DashboardScreen(
                             color = Color.White
                         )
                         Text(
-                            text = "앱이 실시간 병렬 탐색으로 가사와 싱크를 자동 검색합니다",
+                            text = "제목·아티스트와 곡 길이를 비교해 가사 후보를 찾습니다",
                             fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.5f)
                         )
@@ -1494,6 +1499,9 @@ fun DashboardScreen(
             headerContent()
             playerCardContent()
             systemBatteryCardContent()
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF131318))) {
+                PerformanceModeSettings(Modifier.fillMaxWidth().padding(16.dp))
+            }
             visualizerSelectorContent()
             lyricsCacheContent()
             recommendedSourcesContent()
@@ -1620,33 +1628,9 @@ fun MusicVinylDisc(
     secondaryColor: Color,
     modifier: Modifier = Modifier
 ) {
-    val rotationAngle = remember { Animatable(0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            rotationAngle.animateTo(
-                targetValue = rotationAngle.value + 360f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 10000, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart
-                )
-            )
-        }
-    }
-
-    val glowScale = remember { Animatable(1.0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            glowScale.animateTo(
-                targetValue = 1.06f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 2500, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                )
-            )
-        } else {
-            glowScale.animateTo(1.0f, tween(500))
-        }
-    }
+    val profile = LocalPerformanceMode.current.profile
+    val rotationAngle = rememberEffectPhase(isPlaying && profile.richEffects, periodSeconds = 10f)
+    val glowPhase = rememberEffectPhase(isPlaying && profile.richEffects, periodSeconds = 5f)
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -1657,7 +1641,7 @@ fun MusicVinylDisc(
             modifier = Modifier
                 .size(240.dp)
                 .graphicsLayer {
-                    val scale = glowScale.value
+                    val scale = if (profile.richEffects) 1f + 0.03f * (1f - cos(glowPhase.value)) else 1f
                     scaleX = scale
                     scaleY = scale
                 }
@@ -1679,7 +1663,7 @@ fun MusicVinylDisc(
                 .size(220.dp)
                 .shadow(16.dp, shape = CircleShape)
                 .graphicsLayer {
-                    rotationZ = rotationAngle.value
+                    rotationZ = rotationAngle.value * 180f / kotlin.math.PI.toFloat()
                 }
                 .background(Color(0xFF0C0C10), shape = CircleShape)
                 .border(6.dp, Color(0xFF1E1E24), shape = CircleShape),
@@ -1767,6 +1751,38 @@ fun ImmersiveScreensaverView(
     onRequestPermission: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val profile = LocalPerformanceMode.current.profile
+    val effectsActive = LocalEffectsActive.current
+    val sharedPrefs = remember { context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE) }
+    var currentTheme by remember {
+        mutableStateOf(
+            try {
+                ScreensaverTheme.valueOf(
+                    sharedPrefs.getString("screensaver_theme", ScreensaverTheme.APPLE_MUSIC_LYRICS.name) ?: ScreensaverTheme.APPLE_MUSIC_LYRICS.name
+                )
+            } catch (e: Exception) {
+                ScreensaverTheme.APPLE_MUSIC_LYRICS
+            }
+        )
+    }
+
+    if (currentTheme == ScreensaverTheme.APPLE_MUSIC_LYRICS) {
+        AppleMusicScreensaverView(
+            mediaState = mediaState,
+            lyricsLines = lyricsLines,
+            onCloseClicked = onCloseClicked,
+            onSwitchTheme = {
+                currentTheme = ScreensaverTheme.CLASSIC_NEON
+                sharedPrefs.edit().putString("screensaver_theme", currentTheme.name).apply()
+            },
+            onSelectSampleSong = onSelectSampleSong,
+            onOpenDashboard = onCloseClicked,
+            isPermissionGranted = isPermissionGranted,
+            onRequestPermission = onRequestPermission
+        )
+        return
+    }
+
     val rawPrimary = vibeColors.getOrElse(0) { Color(0xFF38BDF8) }
     val rawSecondary = vibeColors.getOrElse(1) { Color(0xFF818CF8) }
 
@@ -1813,22 +1829,24 @@ fun ImmersiveScreensaverView(
     var isRepeat by remember { mutableStateOf(false) }
 
     // Track position state that advances in UI
-    var currentPositionMs by remember { mutableStateOf(mediaState.getCurrentPositionMs()) }
+    var currentPositionMs by rememberPlaybackPosition(mediaState)
 
     // Feature 5: Lyric Sync Calibration and OLED Burn-in drift
-    var syncOffsetMs by remember { mutableStateOf(0L) }
+    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist)
+    val syncOffsetMs = songSyncOffset.millis
     var driftX by remember { mutableStateOf(0f) }
     var driftY by remember { mutableStateOf(0f) }
     
     val calibratedPositionMs = currentPositionMs + syncOffsetMs
 
     val lyricsActiveIndex = remember(lyricsLines, calibratedPositionMs) {
-        val currentSec = (calibratedPositionMs / 1000f) + 0.40f
+        val currentSec = calibratedPositionMs / 1000f
         val idx = lyricsLines.indexOfLast { currentSec >= it.timeSec }
         if (idx == -1) -1 else idx
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(effectsActive) {
+        if (!effectsActive) return@LaunchedEffect
         val random = java.util.Random()
         while (true) {
             delay(30000) // every 30 seconds shift pixel footprint
@@ -1839,28 +1857,14 @@ fun ImmersiveScreensaverView(
 
     val activeBeatScale = 1.0f
 
-    // Resync when state changes
-    LaunchedEffect(mediaState.positionMs, mediaState.isPlaying) {
-        currentPositionMs = mediaState.positionMs
-    }
-
-    // Smoothly advance progress bar when playing (optimized update interval to cut wakeups by 2.5x)
-    LaunchedEffect(mediaState.isPlaying) {
-        if (mediaState.isPlaying) {
-            while (true) {
-                currentPositionMs = mediaState.getCurrentPositionMs()
-                delay(250) // update progress ~4fps for extremely low CPU overhead
-            }
-        }
-    }
-
-    // Clock Status for Top-Left Corner (optimized to 30s delay)
+    // Minute clock, suspended when the screen is not visible.
     var currentTimeStr by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(effectsActive) {
+        if (!effectsActive) return@LaunchedEffect
         val sdf = java.text.SimpleDateFormat("h:mm", java.util.Locale.getDefault())
         while (true) {
             currentTimeStr = sdf.format(java.util.Date())
-            delay(30000)
+            delay(60000 - System.currentTimeMillis() % 60000)
         }
     }
 
@@ -1899,42 +1903,12 @@ fun ImmersiveScreensaverView(
 
     var showControls by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
-    val sharedPrefs = context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE)
     var isControlsPinned by remember {
         mutableStateOf(sharedPrefs.getBoolean("controls_pinned", true))
     }
     var lyricFontScale by remember {
         mutableStateOf(sharedPrefs.getFloat("lyric_font_scale", 1.0f))
     }
-    var currentTheme by remember {
-        mutableStateOf(
-            try {
-                ScreensaverTheme.valueOf(
-                    sharedPrefs.getString("screensaver_theme", ScreensaverTheme.APPLE_MUSIC_LYRICS.name) ?: ScreensaverTheme.APPLE_MUSIC_LYRICS.name
-                )
-            } catch (e: Exception) {
-                ScreensaverTheme.APPLE_MUSIC_LYRICS
-            }
-        )
-    }
-
-    if (currentTheme == ScreensaverTheme.APPLE_MUSIC_LYRICS) {
-        AppleMusicScreensaverView(
-            mediaState = mediaState,
-            lyricsLines = lyricsLines,
-            onCloseClicked = onCloseClicked,
-            onSwitchTheme = {
-                currentTheme = ScreensaverTheme.CLASSIC_NEON
-                sharedPrefs.edit().putString("screensaver_theme", currentTheme.name).apply()
-            },
-            onSelectSampleSong = onSelectSampleSong,
-            onOpenDashboard = onCloseClicked,
-            isPermissionGranted = isPermissionGranted,
-            onRequestPermission = onRequestPermission
-        )
-        return
-    }
-
     // Auto-hide controls when playing after 6 seconds of inactivity (if not pinned)
     LaunchedEffect(showControls, lastInteractionTime, mediaState.isPlaying, isControlsPinned) {
         if (showControls && mediaState.isPlaying && !isControlsPinned) {
@@ -1998,15 +1972,8 @@ fun ImmersiveScreensaverView(
                 )
             } else {
                 // Theme 1: Ambient blurred background (classic smooth aesthetic)
-                val blurredBgBitmap = remember(mediaState.albumArt) {
-                    mediaState.albumArt?.let { raw ->
-                        try {
-                            android.graphics.Bitmap.createScaledBitmap(raw, 64, 64, true).asImageBitmap()
-                        } catch (e: Exception) {
-                            raw.asImageBitmap()
-                        }
-                    }
-                }
+                val backgroundArt = rememberBoundedArtwork(mediaState.albumArt, profile.ambientMaxEdge)
+                val blurredBgBitmap = remember(backgroundArt) { backgroundArt?.asImageBitmap() }
                 if (blurredBgBitmap != null) {
                     Image(
                         bitmap = blurredBgBitmap,
@@ -2015,7 +1982,7 @@ fun ImmersiveScreensaverView(
                         modifier = Modifier
                             .fillMaxSize()
                             .alpha(if (isNightTime) 0.12f else 0.28f)
-                            .blur(28.dp)
+                            .then(if (profile.richEffects) Modifier.blur(28.dp) else Modifier)
                     )
                 }
             }
@@ -2423,7 +2390,7 @@ fun ImmersiveScreensaverView(
                             onLastInteraction = { lastInteractionTime = System.currentTimeMillis() },
                             isLandscape = true,
                             syncOffsetMs = syncOffsetMs,
-                            onSyncOffsetChange = { syncOffsetMs = it }
+                            onSyncOffsetChange = songSyncOffset.set
                         )
                     }
                 }
@@ -2600,7 +2567,7 @@ fun ImmersiveScreensaverView(
                         onLastInteraction = { lastInteractionTime = System.currentTimeMillis() },
                         isLandscape = false,
                         syncOffsetMs = syncOffsetMs,
-                        onSyncOffsetChange = { syncOffsetMs = it }
+                        onSyncOffsetChange = songSyncOffset.set
                     )
                 }
             }
@@ -2841,19 +2808,8 @@ fun WavySlider(
     modifier: Modifier = Modifier
 ) {
     val piFloat = 3.14159265f
-    var wavePhase by remember { mutableStateOf(0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            val frameTimeMs = 1000L / 30L // ~33ms (30 FPS constraint)
-            while (true) {
-                wavePhase += 0.07f
-                if (wavePhase > 2f * piFloat) {
-                    wavePhase -= 2f * piFloat
-                }
-                delay(frameTimeMs)
-            }
-        }
-    }
+    val profile = LocalPerformanceMode.current.profile
+    val wavePhase = rememberEffectPhase(isPlaying && profile.richEffects, periodSeconds = 3f)
     val cachedPath = remember { Path() }
     BoxWithConstraints(
         modifier = modifier
@@ -2904,16 +2860,16 @@ fun WavySlider(
                 path.moveTo(0f, centerY)
 
                 val stepPx = 12.dp.toPx() // Increased from 4.dp to 12.dp to reduce loop cycles by 3x!
-                val segmentCount = (activeWidth / stepPx).toInt().coerceAtLeast(10)
+                val segmentCount = if (profile.richEffects) (activeWidth / stepPx).toInt().coerceAtLeast(10) else 1
                 val baseAmplitude = 3.dp.toPx()
                 val frequency = 0.05f
 
                 for (i in 0..segmentCount) {
                     val x = (i.toFloat() / segmentCount) * activeWidth
-                    val waveY = if (isPlaying && i > 0 && i < segmentCount) {
+                    val waveY = if (isPlaying && profile.richEffects && i > 0 && i < segmentCount) {
                         // Muted fade towards the edges to keep it connected smoothly
                         val edgeFade = sin((i.toFloat() / segmentCount) * piFloat)
-                        centerY + sin(x * frequency - wavePhase) * baseAmplitude * edgeFade
+                        centerY + sin(x * frequency - wavePhase.value) * baseAmplitude * edgeFade
                     } else {
                         centerY
                     }
@@ -3431,37 +3387,70 @@ fun LyricsCorrectionDialog(
     var netEaseResults by remember { mutableStateOf<List<com.example.api.NetEaseSong>>(emptyList()) }
     var selectedNetEaseResult by remember { mutableStateOf<com.example.api.NetEaseSong?>(null) }
     var netEaseLyricsPreview by remember { mutableStateOf<String?>(null) }
+    var netEaseParsedLines by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
 
     var isSearching by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    var searchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    DisposableEffect(searchSource) {
+        onDispose { searchJob?.cancel() }
+    }
+
+    LaunchedEffect(selectedNetEaseResult, searchSource) {
+        val song = selectedNetEaseResult ?: return@LaunchedEffect
+        if (searchSource != 1) return@LaunchedEffect
+        isSearching = true
+        netEaseLyricsPreview = null
+        netEaseParsedLines = emptyList()
+        try {
+            val bundle = song.id?.let { com.example.api.GeminiLyricsService.fetchNetEaseLyrics(it) }
+            netEaseParsedLines = bundle?.parse(durationMs).orEmpty()
+            netEaseLyricsPreview = netEaseParsedLines.joinToString("\n") { line ->
+                buildString {
+                    append(line.text)
+                    line.translation?.let { append("\n$it") }
+                    line.romanization?.let { append("\n$it") }
+                }
+            }
+        } finally {
+            isSearching = false
+        }
+    }
 
     fun performDbSearch() {
         if (dbQueryText.isBlank()) return
+        searchJob?.cancel()
+        val query = dbQueryText.trim()
+        val source = searchSource
         isSearching = true
         searchError = null
         selectedLrclibResult = null
         selectedNetEaseResult = null
         netEaseLyricsPreview = null
-        scope.launch {
+        searchJob = scope.launch {
             try {
-                if (searchSource == 0) {
-                    val results = com.example.api.GeminiLyricsService.searchLrclib(dbQueryText)
+                if (source == 0) {
+                    val results = com.example.api.LyricsSearchRanking.rank(
+                        com.example.api.GeminiLyricsService.searchLrclib(query), title, artist, durationMs)
                     lrclibResults = results
                     if (results.isEmpty()) {
                         searchError = "LRCLIB 검색 결과가 없습니다."
                     }
                 } else {
-                    val results = com.example.api.GeminiLyricsService.searchNetEase(dbQueryText)
+                    val results = com.example.api.GeminiLyricsService.searchNetEase(query)
                     netEaseResults = results
                     if (results.isEmpty()) {
                         searchError = "NetEase 검색 결과가 없습니다."
                     }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 searchError = "검색 중 오류 발생: ${e.message}"
             } finally {
-                isSearching = false
+                if (kotlinx.coroutines.currentCoroutineContext().isActive) isSearching = false
             }
         }
     }
@@ -3583,7 +3572,7 @@ fun LyricsCorrectionDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            listOf("LRCLIB (기본)", "LrcMux (통합 집계)").forEachIndexed { index, name ->
+                            listOf("LRCLIB (기본)", "NetEase").forEachIndexed { index, name ->
                                 val isSelected = searchSource == index
                                 Box(
                                     modifier = Modifier
@@ -3627,7 +3616,7 @@ fun LyricsCorrectionDialog(
                                 OutlinedTextField(
                                     value = dbQueryText,
                                     onValueChange = { dbQueryText = it },
-                                    placeholder = { Text("곡명 또는 가수명 입력", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp) },
+                                    placeholder = { Text(if (searchSource == 1) "곡명·가수 또는 NetEase 곡 링크/ID" else "곡명 또는 가수명 입력", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp) },
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = Color(0xFF00FFFF),
@@ -3710,6 +3699,15 @@ fun LyricsCorrectionDialog(
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
+                                                        Text(
+                                                            text = buildString {
+                                                                val seconds = result.duration?.takeIf { it.isFinite() && it > 0 }
+                                                                append(seconds?.let { formatTime((it * 1000).toLong()) } ?: "길이 정보 없음")
+                                                                if (com.example.api.LyricsSearchRanking.isMatch(result, title, artist, durationMs))
+                                                                    append(" · 현재 곡과 일치")
+                                                            },
+                                                            color = Color(0xFF00FFCC), fontSize = 10.sp
+                                                        )
                                                     }
                                                     
                                                     val badgeBg = if (hasSynced) Color(0xFF005F4B) else Color(0xFF334155)
@@ -3732,19 +3730,7 @@ fun LyricsCorrectionDialog(
                                                         .background(Color(0xFF13132A), shape = RoundedCornerShape(6.dp))
                                                         .clickable { 
                                                             selectedNetEaseResult = song
-                                                            isSearching = true
                                                             netEaseLyricsPreview = null
-                                                            scope.launch {
-                                                                try {
-                                                                    val artistName = song.artists?.joinToString(", ") { it.name ?: "" } ?: ""
-                                                                    val lyrics = com.example.api.GeminiLyricsService.fetchLrcmuxLyrics(song.name ?: "", artistName)
-                                                                    netEaseLyricsPreview = lyrics ?: "[00:00.00] 이 곡은 등록된 가사가 없거나 빈 내용입니다."
-                                                                } catch (e: Exception) {
-                                                                    netEaseLyricsPreview = "[00:00.00] 가사 로드 실패: ${e.message}"
-                                                                } finally {
-                                                                    isSearching = false
-                                                                }
-                                                            }
                                                         }
                                                         .padding(10.dp),
                                                     verticalAlignment = Alignment.CenterVertically,
@@ -3774,7 +3760,7 @@ fun LyricsCorrectionDialog(
                                                             .background(Color(0xFF8B0000), shape = RoundedCornerShape(4.dp))
                                                             .padding(horizontal = 6.dp, vertical = 2.dp)
                                                     ) {
-                                                        Text(text = "🎵 LrcMux", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                        Text(text = "🎵 NetEase", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                                                     }
                                                 }
                                             }
@@ -3786,7 +3772,7 @@ fun LyricsCorrectionDialog(
                             // Result selected - Show Info & Preview
                             val selectedTitle = if (searchSource == 0) selectedLrclibResult?.trackName else selectedNetEaseResult?.name
                             val selectedArtist = if (searchSource == 0) selectedLrclibResult?.artistName else selectedNetEaseResult?.artists?.joinToString(", ") { it.name ?: "" }
-                            val selectedAlbum = if (searchSource == 0) selectedLrclibResult?.albumName else "LrcMux Aggregated"
+                            val selectedAlbum = if (searchSource == 0) selectedLrclibResult?.albumName else "NetEase"
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -3827,7 +3813,7 @@ fun LyricsCorrectionDialog(
                             val rawLyricsText = if (searchSource == 0) {
                                 (selectedLrclibResult?.syncedLyrics ?: selectedLrclibResult?.plainLyrics ?: "")
                             } else {
-                                (netEaseLyricsPreview ?: "가사를 가져오는 중...")
+                                (netEaseLyricsPreview ?: "")
                             }
 
                             Box(
@@ -3919,8 +3905,7 @@ fun LyricsCorrectionDialog(
                             val selected = selectedNetEaseResult
                             val rawLyrics = netEaseLyricsPreview ?: ""
                             if (selected != null && rawLyrics.isNotBlank()) {
-                                val parsed = com.example.api.GeminiLyricsService.parseLrcLyrics(rawLyrics, durationMs)
-                                onSaveManualLyrics(parsed)
+                                onSaveManualLyrics(netEaseParsedLines)
                                 onDismiss()
                             }
                         }
@@ -3947,6 +3932,11 @@ fun LyricsCorrectionDialog(
             } else {
                 Button(
                     onClick = {
+                        if (lrcEditText == initialLrcText) {
+                            onSaveManualLyrics(currentLines)
+                            onDismiss()
+                            return@Button
+                        }
                         val parsed = com.example.api.GeminiLyricsService.parseLrcLyrics(lrcEditText, durationMs)
                         if (parsed.isEmpty() && lrcEditText.trim().isNotEmpty()) {
                             parseError = "올바른 LRC 형식([00:00] 가사)이거나 일반 줄바꿈 가사여야 합니다."

@@ -144,6 +144,8 @@ class MusicNotificationListener : NotificationListenerService() {
             ?: metadata?.getText(MediaMetadata.METADATA_KEY_TITLE)?.toString()
         val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
             ?: metadata?.getText(MediaMetadata.METADATA_KEY_ARTIST)?.toString()
+            ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+            ?: metadata?.getString(MediaMetadata.METADATA_KEY_AUTHOR)
         val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM)
             ?: metadata?.getText(MediaMetadata.METADATA_KEY_ALBUM)?.toString()
         val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L

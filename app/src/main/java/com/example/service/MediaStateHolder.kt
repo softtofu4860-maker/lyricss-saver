@@ -41,12 +41,15 @@ object MediaStateHolder {
         lyrics: String? = null,
         albumArt: android.graphics.Bitmap? = null
     ) {
-        val oldState = _mediaState.value
-        if (oldState.albumArt != null && oldState.albumArt != albumArt) {
-            try {
-                oldState.albumArt.recycle()
-            } catch (e: Exception) {}
+        val previous = _mediaState.value
+        if (previous.title != title || previous.artist != artist ||
+            (previous.durationMs <= 0 && durationMs > 0) || (previous.lyrics.isNullOrBlank() && !lyrics.isNullOrBlank())) {
+            com.example.diagnostics.LyricsDiagnostics.record(com.example.diagnostics.DiagnosticStage.MEDIA_DETECTED,
+                source = packageName.orEmpty(), fields = mapOf("title" to title, "artist" to artist,
+                    "durationMs" to durationMs, "hasLyrics" to !lyrics.isNullOrBlank()))
         }
+        // Album art is shared with Compose and MediaSession; let reference lifetimes
+        // release it instead of recycling a bitmap that may still be on screen.
         _mediaState.value = MediaState(
             title = title,
             artist = artist,
@@ -80,12 +83,6 @@ object MediaStateHolder {
     }
 
     fun clear() {
-        val oldState = _mediaState.value
-        if (oldState.albumArt != null) {
-            try {
-                oldState.albumArt.recycle()
-            } catch (e: Exception) {}
-        }
         _mediaState.value = MediaState()
     }
 }

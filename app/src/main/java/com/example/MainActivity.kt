@@ -9,6 +9,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.example.service.SpotifyBroadcastReceiver
+import com.example.ui.PerformanceEnvironment
 import com.example.ui.MainScreen
 
 class MainActivity : ComponentActivity() {
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxSize(),
                 color = Color(0xFF0B0C10)
             ) {
-                MainScreen()
+                PerformanceEnvironment { MainScreen() }
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.example.data
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -17,5 +18,9 @@ data class CachedLyrics(
     val bpm: Int = 120,
     val hexColorsJson: String = "[\"#FF1E3A8A\", \"#FF3B82F6\", \"#FF06B6D4\"]",
     val genre: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "0")
+    val isUserSaved: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val isFallback: Boolean = false
 )

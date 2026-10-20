@@ -2,12 +2,8 @@ package com.example.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -84,12 +81,14 @@ fun AppleMusicLyricsView(
     syncOffsetSec: Float = 0.0f,
     onSyncOffsetChanged: ((Float) -> Unit)? = null
 ) {
+    val profile = LocalPerformanceMode.current.profile
+    val effectsActive = LocalEffectsActive.current
     val lazyListState = rememberLazyListState()
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
     var localMode by remember { mutableStateOf(currentMode) }
     val effectiveMode = onModeChanged?.let { currentMode } ?: localMode
-    var localOffset by remember { mutableStateOf(syncOffsetSec) }
+    var localOffset by remember(mediaState?.title, mediaState?.artist) { mutableStateOf(syncOffsetSec) }
     val effectiveOffset = onSyncOffsetChanged?.let { syncOffsetSec } ?: localOffset
     var showSyncTuner by remember { mutableStateOf(false) }
     var quoteCardLine by remember { mutableStateOf<LyricLine?>(null) }
@@ -98,8 +97,9 @@ fun AppleMusicLyricsView(
     var isUserBrowsing by remember { mutableStateOf(false) }
 
     // Detect user scrolling to activate browse mode
-    LaunchedEffect(lazyListState.isScrollInProgress) {
-        if (lazyListState.isScrollInProgress) {
+    val isDragged by lazyListState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(isDragged) {
+        if (isDragged) {
             isUserBrowsing = true
         } else if (isUserBrowsing) {
             // After user stops scrolling, keep browsing preview active for 4.5 seconds before auto-resuming sync
@@ -110,7 +110,7 @@ fun AppleMusicLyricsView(
 
     val animatedActiveIndex by animateFloatAsState(
         targetValue = activeIndex.toFloat(),
-        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        animationSpec = if (profile.richEffects && effectsActive) tween(durationMillis = 350, easing = FastOutSlowInEasing) else androidx.compose.animation.core.snap(),
         label = "apple_lyrics_active_index"
     )
 
@@ -251,7 +251,7 @@ fun AppleMusicLyricsView(
                             indication = null
                         ) {
                             // Instant Seek to clicked lyric line
-                            val seekMs = (line.timeSec * 1000).toLong()
+                            val seekMs = ((line.timeSec - effectiveOffset) * 1000).toLong().coerceAtLeast(0L)
                             onLineClicked(seekMs)
                             isUserBrowsing = false
 
@@ -354,13 +354,18 @@ fun AppleMusicLyricsView(
                         com.example.data.TranslationMode.ROMANIZATION -> line.text
                     }
 
-                    Text(
+                    TimedLyricText(
+                        line = line,
                         text = mainText,
-                        color = if (isActive) Color.White else if (isCenterPreview) Color(0xFFF0F0F0) else Color.White,
-                        fontSize = baseFontSize.sp,
-                        fontWeight = fontWeight,
-                        textAlign = TextAlign.Start,
-                        lineHeight = (baseFontSize * 1.35f).sp,
+                        active = isActive,
+                        mediaState = mediaState,
+                        offsetSec = effectiveOffset,
+                        style = androidx.compose.ui.text.TextStyle(
+                            color = if (isCenterPreview) Color(0xFFF0F0F0) else Color.White,
+                            fontSize = baseFontSize.sp,
+                            fontWeight = fontWeight,
+                            textAlign = TextAlign.Start,
+                            lineHeight = (baseFontSize * 1.35f).sp),
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -391,15 +396,9 @@ fun AppleMusicLyricsView(
 
                     // Live Karaoke Ambient Breathing Glow Line for active lyric
                     if (isActive) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "karaoke_glow")
-                        val breatheAlpha by infiniteTransition.animateFloat(
-                            initialValue = 0.35f,
-                            targetValue = 0.85f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1200, easing = FastOutSlowInEasing),
-                                repeatMode = RepeatMode.Reverse
-                            ),
-                            label = "breathe"
+                        val glowPhase = rememberEffectPhase(
+                            playing = mediaState?.isPlaying == true && profile.richEffects,
+                            periodSeconds = 2.4f
                         )
                         Box(
                             modifier = Modifier
@@ -407,15 +406,12 @@ fun AppleMusicLyricsView(
                                 .height(2.5.dp)
                                 .fillMaxWidth(0.38f)
                                 .clip(RoundedCornerShape(1.5.dp))
-                                .background(
-                                    Brush.horizontalGradient(
-                                        listOf(
-                                            Color(0xFF38BDF8).copy(alpha = breatheAlpha),
-                                            Color(0xFFA855F7).copy(alpha = breatheAlpha),
-                                            Color.Transparent
-                                        )
-                                    )
-                                )
+                                .graphicsLayer {
+                                    this.alpha = if (profile.richEffects) 0.6f - 0.25f * kotlin.math.cos(glowPhase.value) else 0.6f
+                                }
+                                .background(remember {
+                                    Brush.horizontalGradient(listOf(Color(0xFF38BDF8), Color(0xFFA855F7), Color.Transparent))
+                                })
                         )
                     }
                 }
@@ -561,7 +557,7 @@ fun AppleMusicLyricsView(
                     modifier = Modifier
                         .padding(horizontal = 20.dp)
                         .clickable {
-                            val seekMs = (previewLine.timeSec * 1000).toLong()
+                            val seekMs = ((previewLine.timeSec - effectiveOffset) * 1000).toLong().coerceAtLeast(0L)
                             onLineClicked(seekMs)
                             isUserBrowsing = false
                         }

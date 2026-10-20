@@ -1,7 +1,8 @@
 package com.example.ui
 
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.draw.drawWithCache
+import com.example.data.RenderProfile
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -11,8 +12,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp // Import Compose color lerp function
-import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlin.math.*
 
 enum class VisualizerMode {
@@ -29,23 +28,9 @@ fun MusicVisualizer(
     mode: VisualizerMode,
     modifier: Modifier = Modifier
 ) {
-    // 30 FPS frame-rate control: manually advance phase at ~30Hz to save CPU/GPU cycles!
-    var phase by remember { mutableStateOf(0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            val frameTimeMs = 1000L / 30L // ~33ms (30 FPS constraint)
-            while (true) {
-                phase += 0.045f
-                if (phase > 2 * PI.toFloat()) {
-                    phase -= 2 * PI.toFloat()
-                }
-                delay(frameTimeMs)
-            }
-        }
-    }
-
-    // Pre-allocate paths to prevent garbage collection overhead during drawing
-    val wavePaths = remember { List(3) { Path() } }
+    val profile = LocalPerformanceMode.current.profile
+    val phase = rememberEffectPhase(isPlaying, periodSeconds = 4.65f)
+    val wavePaths = remember(profile.waveCount) { List(profile.waveCount) { Path() } }
 
     val bpmToUse = if (bpm > 0) bpm else 120
     val beatDurationMs = 60000L / bpmToUse
@@ -65,62 +50,37 @@ fun MusicVisualizer(
         Color(0xFFE2E8F0).copy(alpha = 0.15f) // Soft Off-White
     }
 
-    // Pre-calculate screen sizes and cache gradient brushes to prevent dynamic heap allocations at 60fps/120fps
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
-    val waveBaseY = screenHeightPx * 0.78f
-
-    val gradient0 = remember(primaryColor, screenHeightPx) {
-        Brush.verticalGradient(
-            colors = listOf(primaryColor, Color.Transparent),
-            startY = waveBaseY - (screenHeightPx * 0.05f) * 1.5f,
-            endY = screenHeightPx
-        )
-    }
-    val gradient1 = remember(secondaryColor, screenHeightPx) {
-        Brush.verticalGradient(
-            colors = listOf(secondaryColor, Color.Transparent),
-            startY = waveBaseY - (screenHeightPx * 0.05f * 0.75f) * 1.5f,
-            endY = screenHeightPx
-        )
-    }
-    val gradient2 = remember(accentColor, screenHeightPx) {
-        Brush.verticalGradient(
-            colors = listOf(accentColor, Color.Transparent),
-            startY = waveBaseY - (screenHeightPx * 0.05f * 0.5f) * 1.5f,
-            endY = screenHeightPx
-        )
-    }
-    val waveGradients = remember(gradient0, gradient1, gradient2) {
-        listOf(gradient0, gradient1, gradient2)
-    }
-
-    Canvas(modifier = modifier.fillMaxSize()) {
+    Spacer(modifier = modifier.fillMaxSize().drawWithCache {
         val center = Offset(size.width / 2f, size.height / 2f)
         val maxRadius = min(size.width, size.height) / 2f
-
-        // Calculate beat pulse on the fly during the draw phase based on current time
-        val beatPulse = if (isPlaying) {
-            val systemTime = System.currentTimeMillis()
-            val currentBeatProgress = (systemTime % beatDurationMs).toFloat() / beatDurationMs
-            exp(-4.0f * currentBeatProgress)
-        } else {
-            0f
+        val baseRadius = maxRadius * 0.45f
+        val glowBrushes = listOf(
+            Brush.radialGradient(listOf(primaryColor.copy(alpha = 0.08f), Color.Transparent),
+                center, (baseRadius * 1.8f).coerceAtLeast(1f)),
+            Brush.radialGradient(listOf(accentColor.copy(alpha = 0.12f), Color.Transparent),
+                center, (baseRadius * 0.4f).coerceAtLeast(1f))
+        )
+        val ringEffects = List(2) { i -> PathEffect.dashPathEffect(floatArrayOf(60f, 40f + i * 20f)) }
+        val waveGradients = List(profile.waveCount) { i ->
+            Brush.verticalGradient(listOf(listOf(primaryColor, secondaryColor, accentColor)[i], Color.Transparent),
+                startY = size.height * (0.78f - 0.075f * (1f - i * 0.25f)), endY = size.height)
         }
-
-        when (mode) {
-            VisualizerMode.NEBULA_RING -> {
-                drawNebulaRing(center, maxRadius, phase, beatPulse, primaryColor, secondaryColor, accentColor, isPlaying)
-            }
-            VisualizerMode.LIQUID_WAVES -> {
-                drawLiquidWaves(center, size.width, size.height, phase, beatPulse, isPlaying, wavePaths, waveGradients)
-            }
-            VisualizerMode.CYBER_BARS -> {
-                drawCyberBars(center, maxRadius, phase, beatPulse, primaryColor, secondaryColor, accentColor, isPlaying)
+        onDrawBehind {
+            val beatPulse = if (isPlaying) {
+                val currentBeatProgress = (System.currentTimeMillis() % beatDurationMs).toFloat() / beatDurationMs
+                exp(-4.0f * currentBeatProgress)
+            } else 0f
+            val currentPhase = phase.value
+            when (mode) {
+                VisualizerMode.NEBULA_RING -> drawNebulaRing(center, maxRadius, currentPhase, beatPulse,
+                    primaryColor, secondaryColor, accentColor, isPlaying, profile, glowBrushes, ringEffects)
+                VisualizerMode.LIQUID_WAVES -> drawLiquidWaves(center, size.width, size.height, currentPhase,
+                    beatPulse, isPlaying, wavePaths, waveGradients, profile)
+                VisualizerMode.CYBER_BARS -> drawCyberBars(center, maxRadius, currentPhase, beatPulse,
+                    primaryColor, secondaryColor, accentColor, isPlaying, profile)
             }
         }
-    }
+    })
 }
 
 private fun DrawScope.drawNebulaRing(
@@ -131,25 +91,22 @@ private fun DrawScope.drawNebulaRing(
     primaryColor: Color,
     secondaryColor: Color,
     accentColor: Color,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    profile: RenderProfile,
+    glowBrushes: List<Brush>,
+    ringEffects: List<PathEffect>
 ) {
     val baseRadius = maxRadius * 0.45f
     val pulseOffset = beatPulse * 25f // Muted pulsing scale
     val activeRadius = baseRadius + if (isPlaying) pulseOffset else 0f
 
-    // 1. Draw glowing background radial gradient (Much softer)
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(primaryColor.copy(alpha = 0.08f * (0.5f + beatPulse * 0.5f)), Color.Transparent),
-            center = center,
-            radius = activeRadius * 1.8f
-        ),
-        center = center,
-        radius = activeRadius * 1.8f
+    if (profile.richEffects) drawCircle(
+        brush = glowBrushes[0], alpha = 0.5f + beatPulse * 0.5f,
+        center = center, radius = activeRadius * 1.8f
     )
 
     // 2. Draw orbiting rings (Thinner, more transparent)
-    val ringCount = 2
+    val ringCount = if (profile.richEffects) 2 else 1
     for (i in 0 until ringCount) {
         val angleOffset = i * (PI / ringCount).toFloat()
         val rotationAngle = (phase * (0.6f + i * 0.2f) + angleOffset) * (180f / PI.toFloat())
@@ -161,25 +118,18 @@ private fun DrawScope.drawNebulaRing(
                 radius = activeRadius * (1f + i * 0.12f),
                 style = Stroke(
                     width = (1.5f + beatPulse * 1.5f),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(60f, 40f + i * 20f), 0f)
+                    pathEffect = ringEffects[i]
                 )
             )
         }
     }
 
-    // 3. Draw a central pulsing core (Extremely soft)
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(accentColor.copy(alpha = 0.12f), accentColor.copy(alpha = 0f)),
-            center = center,
-            radius = activeRadius * 0.4f
-        ),
-        center = center,
-        radius = activeRadius * 0.4f
+    if (profile.richEffects) drawCircle(
+        brush = glowBrushes[1], center = center, radius = activeRadius * 0.4f
     )
 
     // 4. Orbiting particles (Fewer, smaller, more elegant)
-    val particleCount = 18
+    val particleCount = profile.particleCount
     for (i in 0 until particleCount) {
         val angle = (i * (2 * PI / particleCount) + phase * 0.25f).toFloat()
         val noise = sin(angle * 4 + phase) * 8f
@@ -193,7 +143,7 @@ private fun DrawScope.drawNebulaRing(
         // Optimized: Passing alphaVal directly to drawCircle instead of creating new instances via Color.copy()
         drawCircle(
             color = if (i % 2 == 0) primaryColor else accentColor,
-            alpha = alphaVal,
+            alpha = alphaVal.coerceIn(0f, 1f),
             center = Offset(particleX, particleY),
             radius = sizeVal
         )
@@ -208,9 +158,10 @@ private fun DrawScope.drawLiquidWaves(
     beatPulse: Float,
     isPlaying: Boolean,
     wavePaths: List<Path>,
-    waveGradients: List<Brush>
+    waveGradients: List<Brush>,
+    profile: RenderProfile
 ) {
-    val waveCount = 3
+    val waveCount = profile.waveCount
     val baseAmplitude = height * 0.05f
     val speedMultiplier = if (isPlaying) 1.0f + beatPulse * 1.2f else 0.3f
     val waveBaseY = height * 0.78f // Shifted to lower part of the screen so it doesn't cross behind the center lyric lines!
@@ -225,7 +176,7 @@ private fun DrawScope.drawLiquidWaves(
 
         path.moveTo(0f, waveBaseY)
 
-        for (x in 0..width.toInt() step 18) {
+        for (x in 0..width.toInt() step profile.waveStepPx) {
             val radians = x * frequency + wavePhase
             val y = waveBaseY + sin(radians) * amplitude + cos(radians * 0.4f) * (amplitude * 0.25f)
             path.lineTo(x.toFloat(), y)
@@ -259,10 +210,11 @@ private fun DrawScope.drawCyberBars(
     primaryColor: Color,
     secondaryColor: Color,
     accentColor: Color,
-    isPlaying: Boolean
+    isPlaying: Boolean,
+    profile: RenderProfile
 ) {
     val innerRadius = maxRadius * 0.52f // Pushed outward to clear the center text
-    val barCount = 36 // Reduced density
+    val barCount = profile.barCount // Reduced density
     val maxBarHeight = maxRadius * 0.28f
 
     for (i in 0 until barCount) {

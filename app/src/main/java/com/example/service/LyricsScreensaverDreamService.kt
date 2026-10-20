@@ -1,24 +1,19 @@
 package com.example.service
 
-import android.content.Context
 import android.os.Bundle
 import android.service.dreams.DreamService
 import android.view.ViewGroup
-import androidx.activity.ComponentActivity
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -34,15 +29,19 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.api.GeminiLyricsService
 import com.example.data.LyricLine
 import com.example.data.LyricsRepository
+import com.example.ui.PerformanceEnvironment
+import com.example.ui.LocalPerformanceMode
+import com.example.ui.rememberBoundedArtwork
 import com.example.ui.AppleMusicScreensaverView
 import com.example.ui.LyricsCorrectionDialog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.json.JSONArray
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.collect
 
 class LyricsScreensaverDreamService : DreamService(),
     LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
@@ -85,14 +84,16 @@ class LyricsScreensaverDreamService : DreamService(),
             setViewTreeSavedStateRegistryOwner(this@LyricsScreensaverDreamService)
 
             setContent {
-                DreamScreensaverScreen(
-                    repository = repository,
-                    onWakeUp = {
-                        try {
-                            wakeUp()
-                        } catch (_: Exception) {}
-                    }
-                )
+                PerformanceEnvironment {
+                    DreamScreensaverScreen(
+                        repository = repository,
+                        onWakeUp = {
+                            try {
+                                wakeUp()
+                            } catch (_: Exception) {}
+                        }
+                    )
+                }
             }
         }
 
@@ -119,29 +120,29 @@ private fun DreamScreensaverScreen(
     repository: LyricsRepository,
     onWakeUp: () -> Unit
 ) {
-    val mediaState by MediaStateHolder.mediaState.collectAsState()
+    val rawMediaState by MediaStateHolder.mediaState.collectAsState()
+    val artwork = rememberBoundedArtwork(rawMediaState.albumArt, LocalPerformanceMode.current.profile.artworkMaxEdge)
+    val mediaState = remember(rawMediaState, artwork) { rawMediaState.copy(albumArt = artwork) }
     var lyrics by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
-    var auraColors by remember { mutableStateOf<List<Color>>(emptyList()) }
     var showCorrectionDialog by remember { mutableStateOf(false) }
-
-    // 재생 시간 주기적 갱신
-    var ticker by remember { mutableStateOf(0L) }
-    LaunchedEffect(mediaState.isPlaying) {
-        while (mediaState.isPlaying) {
-            delay(250)
-            ticker = System.currentTimeMillis()
-        }
-    }
+    val correctionScope = rememberCoroutineScope()
+    var correctionJob by remember { mutableStateOf<Job?>(null) }
+    var automaticJob by remember { mutableStateOf<Job?>(null) }
 
     // 곡이 바뀌면 가사 로드
-    LaunchedEffect(mediaState.title, mediaState.artist) {
+    LaunchedEffect(mediaState.title, mediaState.artist, mediaState.lyrics, mediaState.durationMs) {
+        automaticJob = currentCoroutineContext()[Job]
+        correctionJob?.cancel()
+        lyrics = emptyList()
         val title = mediaState.title
-        val artist = mediaState.artist
-        if (!title.isNullOrBlank() && !artist.isNullOrBlank()) {
+        val artist = mediaState.artist.orEmpty()
+        if (!title.isNullOrBlank()) {
             try {
-                val cached = repository.getLyrics(title, artist, durationMs = mediaState.durationMs)
-                lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
-                auraColors = parseAuraColors(cached.hexColorsJson)
+                repository.observeAutomaticLyrics(title, artist, mediaState.lyrics, mediaState.durationMs).collect { cached ->
+                    lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {}
         }
     }
@@ -161,9 +162,11 @@ private fun DreamScreensaverScreen(
                 durationMs = mediaState.durationMs,
                 onDismiss = { showCorrectionDialog = false },
                 onReSearchRequested = { q ->
+                    automaticJob?.cancel()
                     val title = mediaState.title ?: ""
                     val artist = mediaState.artist ?: ""
-                    CoroutineScope(Dispatchers.IO).launch {
+                    correctionJob?.cancel()
+                    correctionJob = correctionScope.launch {
                         try {
                             val cached = repository.getLyrics(
                                 title = title,
@@ -172,56 +175,22 @@ private fun DreamScreensaverScreen(
                                 customQuery = q
                             )
                             lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
-                            auraColors = parseAuraColors(cached.hexColorsJson)
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (_: Exception) {}
                     }
                 },
                 onSaveManualLyrics = { newLines ->
+                    automaticJob?.cancel()
                     lyrics = newLines
                     val title = mediaState.title ?: ""
                     val artist = mediaState.artist ?: ""
-                    CoroutineScope(Dispatchers.IO).launch {
-                        repository.saveLyrics(
-                            com.example.data.CachedLyrics(
-                                id = GeminiLyricsService.generateSongId(title, artist),
-                                title = title,
-                                artist = artist,
-                                lyricsJson = GeminiLyricsService.lyricAdapter.toJson(newLines),
-                                hexColorsJson = GeminiLyricsService.getElegantAuraColors(title, artist)
-                            )
-                        )
+                    correctionJob?.cancel()
+                    correctionJob = correctionScope.launch {
+                        repository.saveManualLyrics(title, artist, newLines)
                     }
                 }
             )
         }
     }
-}
-
-private fun parseAuraColors(hexJson: String): List<Color> {
-    return try {
-        val array = JSONArray(hexJson)
-        val list = mutableListOf<Color>()
-        for (i in 0 until array.length()) {
-            val hex = array.getString(i).replace("#", "")
-            val colorInt = hex.toLong(16)
-            val finalColor = if (hex.length == 6) {
-                Color(0xFF000000 or colorInt)
-            } else {
-                Color(colorInt)
-            }
-            list.add(finalColor)
-        }
-        if (list.isEmpty()) getDefaultColors() else list
-    } catch (_: Exception) {
-        getDefaultColors()
-    }
-}
-
-private fun getDefaultColors(): List<Color> {
-    return listOf(
-        Color(0xFF1E1B4B),
-        Color(0xFF312E81),
-        Color(0xFF0F172A),
-        Color(0xFF4C1D95)
-    )
 }

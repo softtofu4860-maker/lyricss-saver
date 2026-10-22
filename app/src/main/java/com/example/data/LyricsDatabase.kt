@@ -7,13 +7,18 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [CachedLyrics::class], version = 3, exportSchema = false)
+@Database(entities = [CachedLyrics::class], version = 4, exportSchema = false)
 abstract class LyricsDatabase : RoomDatabase() {
     abstract fun lyricsDao(): LyricsDao
 
     companion object {
         @Volatile
         private var INSTANCE: LyricsDatabase? = null
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cached_lyrics ADD COLUMN identityBinding TEXT DEFAULT NULL")
+            }
+        }
 
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -61,14 +66,14 @@ abstract class LyricsDatabase : RoomDatabase() {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext, LyricsDatabase::class.java, "lyrics_database"
             )
-                .addMigrations(MIGRATION_2_3)
+                .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         super.onCreate(db)
                         // Seed in the creation transaction; no detached coroutine or recursive open.
                         SampleDataProvider.getSampleSongs().forEach { song ->
                             db.execSQL(
-                                "INSERT OR IGNORE INTO cached_lyrics VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)",
+                                "INSERT OR IGNORE INTO cached_lyrics (id,title,artist,lyricsJson,bpm,hexColorsJson,genre,timestamp,isUserSaved,isFallback) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)",
                                 arrayOf<Any?>(song.id, song.title, song.artist, song.lyricsJson, song.bpm,
                                     song.hexColorsJson, song.genre, song.timestamp)
                             )

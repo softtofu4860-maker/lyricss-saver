@@ -8,18 +8,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import com.example.service.SpotifyBroadcastReceiver
 import com.example.ui.PerformanceEnvironment
 import com.example.ui.MainScreen
 
 class MainActivity : ComponentActivity() {
 
-    private val spotifyReceiver = SpotifyBroadcastReceiver()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        SpotifyBroadcastReceiver.register(this, spotifyReceiver)
 
         setContent {
             Surface(
@@ -32,7 +29,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        SpotifyBroadcastReceiver.unregister(this, spotifyReceiver)
         super.onDestroy()
     }
 }

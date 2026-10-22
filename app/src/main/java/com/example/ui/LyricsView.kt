@@ -185,7 +185,7 @@ fun LyricsView(
                             indication = null // Clean hover, no heavy ripple on plain text click
                         ) {
                             // Seek to song position of the clicked line
-                            onLineClicked((line.timeSec * 1000).toLong())
+                            if (com.example.data.LyricPresentation.canSeek(line)) onLineClicked((line.timeSec * 1000).toLong())
                             isUserBrowsing = false
                             coroutineScope.launch {
                                 try {
@@ -377,7 +377,7 @@ fun MinimalLyricsView(
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                             indication = null
                         ) {
-                            onLineClicked((line.timeSec * 1000).toLong())
+                            if (com.example.data.LyricPresentation.canSeek(line)) onLineClicked((line.timeSec * 1000).toLong())
                             isUserBrowsing = false
                             coroutineScope.launch {
                                 try {

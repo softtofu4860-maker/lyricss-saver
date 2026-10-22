@@ -49,7 +49,7 @@ class LyricsRepository internal constructor(
 
     /** A bounded retry sequence, cancelled with the song's UI request or a manual correction. */
     fun observeAutomaticLyrics(title: String, artist: String, metadataLyrics: String? = null,
-                              durationMs: Long = 0L): Flow<CachedLyrics> = flow {
+                              durationMs: Long = 0L, descriptor: SongDescriptor? = null): Flow<CachedLyrics> = flow {
         val songId = SongIdentity.id(title, artist)
         for ((index, waitMs) in listOf(0L, 2000L, 8000L).withIndex()) {
             LyricsDiagnostics.record(if (waitMs > 0) DiagnosticStage.RETRY else DiagnosticStage.SEARCH_START,
@@ -57,7 +57,7 @@ class LyricsRepository internal constructor(
                     "attempt" to index + 1, "delayMs" to waitMs))
             if (waitMs > 0) delay(waitMs)
             val result = try {
-                getLyrics(title, artist, metadataLyrics, durationMs)
+                getLyrics(title, artist, metadataLyrics, durationMs, descriptor = descriptor)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -78,15 +78,18 @@ class LyricsRepository internal constructor(
         artist: String,
         metadataLyrics: String? = null,
         durationMs: Long = 0L,
-        customQuery: String? = null
+        customQuery: String? = null,
+        descriptor: SongDescriptor? = null
     ): CachedLyrics = withContext(ioDispatcher) {
-        val songId = SongIdentity.id(title, artist)
+        val songId = descriptor?.id ?: SongIdentity.id(title, artist)
         val query = customQuery?.trim()?.takeIf { it.isNotEmpty() }
         LyricsDiagnostics.record(DiagnosticStage.SEARCH_START, "repository", songId,
             mapOf("mode" to if (query == null) "automatic" else "manual", "query" to query,
                 "hasLyrics" to !metadataLyrics.isNullOrBlank()))
         lock(songId).withLock {
-            val cached = dao.getLyricsById(songId)
+            val cached = dao.getLyricsById(songId) ?: descriptor?.takeIf { it.id != it.legacyId }?.let {
+                dao.claimLegacy(it.legacyId, it.id)
+            }
             if (query == null && cached != null && !GeminiLyricsService.isFallbackLyrics(cached) &&
                 (metadataLyrics.isNullOrBlank() || cached.isUserSaved)) {
                 LyricsDiagnostics.record(DiagnosticStage.CACHE_HIT, "repository", songId)
@@ -108,13 +111,15 @@ class LyricsRepository internal constructor(
         }
     }
 
-    suspend fun saveManualLyrics(title: String, artist: String, lines: List<LyricLine>): CachedLyrics =
+    suspend fun saveManualLyrics(title: String, artist: String, lines: List<LyricLine>, descriptor: SongDescriptor? = null): CachedLyrics =
         withContext(ioDispatcher) {
-            val id = SongIdentity.id(title, artist)
+            val id = descriptor?.id ?: SongIdentity.id(title, artist)
             lock(id).withLock {
                 val existing = dao.getLyricsById(id)
                 val updated = (existing ?: CachedLyrics(id, title, artist, "[]")).copy(
-                    lyricsJson = GeminiLyricsService.lyricAdapter.toJson(lines),
+                    lyricsJson = GeminiLyricsService.lyricAdapter.toJson(lines.map {
+                        if (it.timingSource.startsWith("manual:")) it else it.copy(timingSource = "manual:${it.timingSource}")
+                    }),
                     timestamp = System.currentTimeMillis(), isUserSaved = true, isFallback = false
                 )
                 dao.insertLyrics(updated)

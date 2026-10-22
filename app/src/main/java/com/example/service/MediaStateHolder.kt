@@ -1,5 +1,8 @@
 package com.example.service
 
+import android.os.SystemClock
+import com.example.data.SongDescriptor
+
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -12,15 +15,23 @@ data class MediaState(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val packageName: String? = null,
-    val lastUpdateTime: Long = 0, // System.currentTimeMillis()
+    val lastUpdateTime: Long = 0, // SystemClock.elapsedRealtime(), never wall time
     val speed: Float = 1.0f,
     val lyrics: String? = null,
-    val albumArt: android.graphics.Bitmap? = null
+    val albumArt: android.graphics.Bitmap? = null,
+    val providerId: String? = null,
+    val positionKnown: Boolean = positionMs >= 0
 ) {
-    fun getCurrentPositionMs(): Long {
-        if (!isPlaying) return positionMs
-        val elapsed = System.currentTimeMillis() - lastUpdateTime
-        val calculated = positionMs + (elapsed * speed).toLong()
+    val song: SongDescriptor get() = if (packageName in listOf("com.example.sample", "com.example.library"))
+        SongDescriptor(title.orEmpty(), artist.orEmpty(), savedId = if (packageName == "com.example.library") providerId else null) else SongDescriptor(title.orEmpty(), artist.orEmpty(),
+            album.orEmpty(), durationMs, packageName.orEmpty(), providerId.orEmpty())
+    val songId: String get() = if (packageName == "com.example.library" && !providerId.isNullOrBlank()) providerId else song.id
+    fun getCurrentPositionMs(nowElapsed: Long = SystemClock.elapsedRealtime()): Long {
+        val base = if (positionKnown) positionMs.coerceAtLeast(0) else 0L
+        val elapsed = if (positionKnown && isPlaying && lastUpdateTime > 0 && lastUpdateTime <= nowElapsed)
+            nowElapsed - lastUpdateTime else 0L
+        val rate = speed.takeIf { it.isFinite() && it >= 0 } ?: 0f
+        val calculated = (base.toDouble() + elapsed.toDouble() * rate).toLong().coerceAtLeast(0)
         return if (durationMs > 0) calculated.coerceAtMost(durationMs) else calculated
     }
 }
@@ -39,7 +50,9 @@ object MediaStateHolder {
         packageName: String?,
         speed: Float = 1.0f,
         lyrics: String? = null,
-        albumArt: android.graphics.Bitmap? = null
+        albumArt: android.graphics.Bitmap? = null,
+        lastPositionUpdateTime: Long = SystemClock.elapsedRealtime(),
+        providerId: String? = null
     ) {
         val previous = _mediaState.value
         if (previous.title != title || previous.artist != artist ||
@@ -58,10 +71,11 @@ object MediaStateHolder {
             positionMs = positionMs,
             durationMs = durationMs,
             packageName = packageName,
-            lastUpdateTime = System.currentTimeMillis(),
+            lastUpdateTime = lastPositionUpdateTime,
             speed = speed,
             lyrics = lyrics,
-            albumArt = albumArt
+            albumArt = albumArt,
+            providerId = providerId
         )
     }
 
@@ -70,7 +84,7 @@ object MediaStateHolder {
         _mediaState.value = current.copy(
             positionMs = current.getCurrentPositionMs(),
             isPlaying = isPlaying,
-            lastUpdateTime = System.currentTimeMillis()
+            lastUpdateTime = SystemClock.elapsedRealtime()
         )
     }
 
@@ -78,7 +92,8 @@ object MediaStateHolder {
         val current = _mediaState.value
         _mediaState.value = current.copy(
             positionMs = positionMs,
-            lastUpdateTime = System.currentTimeMillis()
+            positionKnown = positionMs >= 0,
+            lastUpdateTime = SystemClock.elapsedRealtime()
         )
     }
 

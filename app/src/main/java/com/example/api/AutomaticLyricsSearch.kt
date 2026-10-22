@@ -29,7 +29,7 @@ internal class AutomaticLyricsSearch(
                     ?.let { LyricsParser.parse(it, durationMs) }.orEmpty()
                 if (exact.isNotEmpty()) {
                     event(DiagnosticStage.MATCH, "lrclib_exact", mapOf("count" to exact.size))
-                    return@withTimeoutOrNull exact
+                    return@withTimeoutOrNull exact.map { it.copy(timingSource = "lrclib:${it.timingSource}") }
                 }
             }
             for (query in queries) {
@@ -53,7 +53,7 @@ internal class AutomaticLyricsSearch(
                         ?: candidate.plainLyrics.orEmpty(), durationMs)
                     if (lines.isNotEmpty()) {
                         event(DiagnosticStage.MATCH, "lrclib", mapOf("count" to lines.size))
-                        return@withTimeoutOrNull lines
+                        return@withTimeoutOrNull lines.map { it.copy(timingSource = "lrclib:${it.timingSource}") }
                     }
                 }
             }

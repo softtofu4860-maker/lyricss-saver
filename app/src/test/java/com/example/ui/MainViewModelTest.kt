@@ -191,6 +191,22 @@ class MainViewModelTest {
         advanceUntilIdle()
         assertEquals(1, calls)
     }
+
+    @Test fun `translation failure reports the reason and keeps the exact original state`() = runTest(dispatcher) {
+        val original = song("song")
+        database.lyricsDao().insertLyrics(original)
+        val vm = viewModel({ error("unexpected fetch") }, {
+            throw com.example.api.TranslationFailure(com.example.api.TranslationProblem.AUTHENTICATION)
+        })
+        runCurrent()
+        vm.loadLyricsFromLibrary(original)
+        runCurrent()
+        val before = vm.lyricsState.value
+        vm.translateActiveLyrics()
+        vm.translationStatus.first { it == com.example.api.TranslationProblem.AUTHENTICATION.message }
+        assertEquals(before, vm.lyricsState.value)
+        assertEquals(original, database.lyricsDao().getLyricsById(original.id))
+    }
 }
 
 private suspend fun kotlinx.coroutines.flow.StateFlow<LyricsUiState>.firstSuccess(

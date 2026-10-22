@@ -51,6 +51,8 @@ object GeminiLyricsService {
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
         .build()
+    private val translationHttpClient = okHttpClient.newBuilder()
+        .readTimeout(45, TimeUnit.SECONDS).callTimeout(60, TimeUnit.SECONDS).build()
 
     private val moshi = Moshi.Builder()
         .add(KotlinJsonAdapterFactory())
@@ -82,7 +84,7 @@ object GeminiLyricsService {
         val query = customQuery?.trim()?.takeIf { it.isNotEmpty() }
         if (query != null) {
             val lrc = fetchLrclibFirstResult(query)
-            val parsed = lrc?.let { parseLrcLyrics(it, durationMs) }.orEmpty()
+            val parsed = lrc?.let { parseLrcLyrics(it, durationMs).map { line -> line.copy(timingSource = "lrclib:${line.timingSource}") } }.orEmpty()
             return@withContext if (parsed.isNotEmpty()) CachedLyrics(
                 id = songId, title = title, artist = artist,
                 lyricsJson = lyricAdapter.toJson(parsed),
@@ -92,7 +94,7 @@ object GeminiLyricsService {
 
         // 1. 메타데이터에 가사가 이미 있는 경우 (LRC 형식 등)
         if (!metadataLyrics.isNullOrBlank()) {
-            val parsed = parseLrcLyrics(metadataLyrics, durationMs)
+            val parsed = parseLrcLyrics(metadataLyrics, durationMs).map { it.copy(timingSource = "media:${it.timingSource}") }
             if (parsed.isNotEmpty()) {
                 com.example.diagnostics.LyricsDiagnostics.record(com.example.diagnostics.DiagnosticStage.METADATA_USED,
                     "media", songId, mapOf("count" to parsed.size))
@@ -272,7 +274,8 @@ object GeminiLyricsService {
     data class NetEaseLyricsBundle(val lrc: String?, val tlyric: String?, val romalrc: String?, val yrc: String? = null) {
         fun parse(durationMs: Long): List<LyricLine> {
             val wordLines = yrc?.let { parseLrcLyrics(it, durationMs, tlyric, romalrc) }.orEmpty()
-            return wordLines.takeIf { it.isNotEmpty() } ?: parseLrcLyrics(lrc.orEmpty(), durationMs, tlyric, romalrc)
+            return (wordLines.takeIf { it.isNotEmpty() } ?: parseLrcLyrics(lrc.orEmpty(), durationMs, tlyric, romalrc))
+                .map { it.copy(timingSource = "netease:${it.timingSource}") }
         }
     }
 
@@ -371,51 +374,8 @@ object GeminiLyricsService {
         )
     }
 
-    suspend fun translateLyricsViaGemini(rawLrcText: String, context: Context): String = withContext(Dispatchers.IO) {
-        val apiKey = com.example.BuildConfig.GEMINI_API_KEY
-        if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext rawLrcText
-        }
-        try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
-            val prompt = """
-                Translate the following synchronized LRC lyrics into natural, poetic Korean while strictly preserving the timestamps like [mm:ss.xx].
-                Return ONLY the translated LRC text, without any explanations or markdown backticks.
-
-                $rawLrcText
-            """.trimIndent()
-
-            val jsonPayload = JSONObject().apply {
-                val contents = JSONArray().apply {
-                    val contentObj = JSONObject().apply {
-                        val parts = JSONArray().apply {
-                            put(JSONObject().apply { put("text", prompt) })
-                        }
-                        put("parts", parts)
-                    }
-                    put(contentObj)
-                }
-                put("contents", contents)
-            }
-
-            val request = Request.Builder()
-                .url(url)
-                .post(jsonPayload.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val body = okHttpClient.readText(request) ?: return@withContext rawLrcText
-            val respJson = JSONObject(body)
-            val candidates = respJson.optJSONArray("candidates") ?: return@withContext rawLrcText
-            val parts = candidates.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
-            val text = parts?.optJSONObject(0)?.optString("text")
-            if (!text.isNullOrBlank()) text.replace("```lrc", "").replace("```", "").trim() else rawLrcText
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.e(TAG, "Gemini translation error: ${e.message}")
-            rawLrcText
-        }
-    }
+    suspend fun translateLyricsViaGemini(rawLrcText: String, context: Context): String =
+        GeminiTranslationClient({ com.example.data.PersonalApiKeyStore(context).get() }, translationHttpClient).translate(rawLrcText)
 
     fun getElegantAuraColors(title: String, artist: String): String {
         val hash = (title + artist).hashCode()

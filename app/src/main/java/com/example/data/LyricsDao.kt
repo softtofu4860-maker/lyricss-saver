@@ -8,6 +8,14 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface LyricsDao {
+    @androidx.room.Transaction
+    suspend fun claimLegacy(legacyId: String, newId: String): CachedLyrics? {
+        getLyricsById(newId)?.let { return it }
+        val legacy = getLyricsById(legacyId) ?: return null
+        if (!legacy.isUserSaved || legacy.isFallback || (legacy.identityBinding != null && legacy.identityBinding != newId)) return null
+        insertLyrics(legacy.copy(identityBinding = newId))
+        return legacy.copy(id = newId, identityBinding = newId).also { insertLyrics(it) }
+    }
     @Query("SELECT * FROM cached_lyrics WHERE id = :id")
     suspend fun getLyricsById(id: String): CachedLyrics?
 

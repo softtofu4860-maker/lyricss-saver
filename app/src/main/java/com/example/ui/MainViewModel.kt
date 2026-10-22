@@ -49,6 +49,8 @@ class MainViewModel internal constructor(
 
     private val _lyricsState = MutableStateFlow<LyricsUiState>(LyricsUiState.Empty)
     val lyricsState: StateFlow<LyricsUiState> = _lyricsState.asStateFlow()
+    private val _translationStatus = MutableStateFlow<String?>(null)
+    val translationStatus: StateFlow<String?> = _translationStatus.asStateFlow()
     val mediaState = MediaStateHolder.mediaState
 
     private val _translationMode = MutableStateFlow(TranslationMode.BILINGUAL)
@@ -75,7 +77,7 @@ class MainViewModel internal constructor(
                 val title = state.title
                 val artist = state.artist.orEmpty()
                 if (!title.isNullOrBlank()) {
-                    val id = SongIdentity.id(title, artist)
+                    val id = state.songId
                     val newMetadata = !state.lyrics.isNullOrBlank() && state.lyrics != lastMetadataLyrics
                     val durationAvailable = lastLoadedDurationMs <= 0 && state.durationMs > 0
                     if (id != lastLoadedSongKey || newMetadata || durationAvailable) {
@@ -98,6 +100,7 @@ class MainViewModel internal constructor(
 
     private fun invalidateRequest(): Long {
         activeRequest?.cancel()
+        _translationStatus.value = null
         return ++generation
     }
 
@@ -129,14 +132,16 @@ class MainViewModel internal constructor(
 
     fun loadLyrics(title: String, artist: String, metadataLyrics: String? = null,
         durationMs: Long = 0, customQuery: String? = null) {
+        val descriptor = mediaState.value.takeIf { it.title == title && it.artist.orEmpty() == artist }?.song
+        val requestId = descriptor?.id ?: SongIdentity.id(title, artist)
         if (customQuery.isNullOrBlank()) {
-            val id = SongIdentity.id(title, artist)
+            val id = requestId
             val token = invalidateRequest()
             activeSongId = id
             _lyricsState.value = LyricsUiState.Loading
             activeRequest = viewModelScope.launch {
                 try {
-                    repository.observeAutomaticLyrics(title, artist, metadataLyrics, durationMs).collect { lyrics ->
+                    repository.observeAutomaticLyrics(title, artist, metadataLyrics, durationMs, descriptor).collect { lyrics ->
                         if (isCurrent(token, id)) _lyricsState.value = success(lyrics)
                     }
                 } catch (cancelled: CancellationException) {
@@ -148,17 +153,18 @@ class MainViewModel internal constructor(
             }
             return
         }
-        load(SongIdentity.id(title, artist)) {
-            success(repository.getLyrics(title, artist, metadataLyrics, durationMs, customQuery))
+        load(requestId) {
+            success(repository.getLyrics(title, artist, metadataLyrics, durationMs, customQuery, descriptor))
         }
     }
 
     fun saveManualLyrics(title: String, artist: String, editedLines: List<LyricLine>) {
-        val id = SongIdentity.id(title, artist)
+        val descriptor = mediaState.value.takeIf { it.title == title && it.artist.orEmpty() == artist }?.song
+        val id = descriptor?.id ?: SongIdentity.id(title, artist)
         val token = if (activeSongId == id) invalidateRequest() else generation
         viewModelScope.launch {
             try {
-                val updated = repository.saveManualLyrics(title, artist, editedLines)
+                val updated = repository.saveManualLyrics(title, artist, editedLines, descriptor)
                 if (isCurrent(token, id)) _lyricsState.value = success(updated)
             } catch (e: CancellationException) {
                 throw e
@@ -202,7 +208,7 @@ class MainViewModel internal constructor(
                 title = cachedLyrics.title, artist = cachedLyrics.artist, album = "저장된 라이브러리",
                 isPlaying = false, positionMs = 0L,
                 durationMs = duration,
-                packageName = "com.example.library", lyrics = null
+                packageName = "com.example.library", lyrics = null, providerId = cachedLyrics.id
             )
         } catch (e: Exception) {
             _lyricsState.value = LyricsUiState.Error("Error: ${e.message}")
@@ -212,15 +218,29 @@ class MainViewModel internal constructor(
     fun translateActiveLyrics() {
         val original = _lyricsState.value as? LyricsUiState.Success ?: return
         if (original.cachedLyrics.isFallback) return
-        load(original.cachedLyrics.id, onError = original) {
-            val raw = LyricsTranslation.toLrc(original.parsedLines)
-            val translated = translate(raw)
-            if (translated == raw) return@load original
-            val lines = LyricsTranslation.merge(original.parsedLines,
-                GeminiLyricsService.parseLrcLyrics(translated))
-            if (lines == original.parsedLines) return@load original
-            val saved = repository.saveTranslation(original.cachedLyrics, lines)
-            if (saved != null) success(saved) else original
+        val token = invalidateRequest()
+        val id = original.cachedLyrics.id
+        _translationStatus.value = "번역 중…"
+        activeRequest = viewModelScope.launch {
+            try {
+                val raw = LyricsTranslation.toLrc(original.parsedLines)
+                val translated = translate(raw)
+                if (translated == raw) throw com.example.api.TranslationFailure(com.example.api.TranslationProblem.EMPTY)
+                val lines = LyricsTranslation.merge(original.parsedLines, GeminiLyricsService.parseLrcLyrics(translated))
+                if (lines == original.parsedLines) throw com.example.api.TranslationFailure(com.example.api.TranslationProblem.EMPTY)
+                currentCoroutineContext().ensureActive()
+                if (!isCurrent(token, id)) return@launch
+                val saved = repository.saveTranslation(original.cachedLyrics, lines)
+                if (isCurrent(token, id)) {
+                    if (saved != null) { _lyricsState.value = success(saved); _translationStatus.value = "번역 완료" }
+                    else _translationStatus.value = "가사가 변경되어 번역을 적용하지 않았습니다."
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: com.example.api.TranslationFailure) {
+                if (isCurrent(token, id)) _translationStatus.value = failure.problem.message
+            } catch (_: Exception) {
+                if (isCurrent(token, id)) _translationStatus.value = "번역을 완료하지 못했습니다. 원문을 유지합니다."
+            }
         }
     }
 }

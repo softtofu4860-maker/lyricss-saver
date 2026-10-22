@@ -28,9 +28,11 @@ object LyricsParser {
                 .minByOrNull { abs(it.timeSec - time) }
                 ?.takeIf { abs(it.timeSec - time) < 0.25f }?.text
         }
-        return original.map { line -> line.copy(
-            translation = nearest(translations, line.timeSec) ?: line.translation,
-            romanization = nearest(romanizations, line.timeSec) ?: line.romanization
+        return original.mapIndexed { index, line -> line.copy(
+            translation = (if (line.timing == LyricTiming.PLAIN && translations.size == original.size) translations[index].text
+                else nearest(translations.filter { it.timing == LyricTiming.SYNCED }, line.timeSec)) ?: line.translation,
+            romanization = (if (line.timing == LyricTiming.PLAIN && romanizations.size == original.size) romanizations[index].text
+                else nearest(romanizations.filter { it.timing == LyricTiming.SYNCED }, line.timeSec)) ?: line.romanization
         ) }
     }
 
@@ -60,7 +62,7 @@ object LyricsParser {
                 }
                 val content = words.joinToString("") { it.text }
                 if (content.isNotBlank()) result.add(LyricLine((start + offset).coerceAtLeast(0f), content,
-                    words = words, endTimeSec = (end + offset).coerceAtLeast(0f)))
+                    words = words, endTimeSec = (end + offset).coerceAtLeast(0f), timing = LyricTiming.SYNCED, timingSource = "yrc"))
                 continue
             }
             val tags = timestamp.findAll(line).takeWhile { match ->
@@ -89,12 +91,11 @@ object LyricsParser {
                 // A missing terminal marker cannot safely supply word timing for the whole line.
                 val validWords = words.takeIf { it.joinToString("") { word -> word.text } == content }.orEmpty()
                 result.add(LyricLine((seconds(tag) + offset).coerceAtLeast(0f), content,
-                    words = validWords, endTimeSec = validWords.lastOrNull()?.endTimeSec))
+                    words = validWords, endTimeSec = validWords.lastOrNull()?.endTimeSec, timing = LyricTiming.SYNCED, timingSource = "lrc"))
             }
         }
         if (!timed) {
-            val step = (if (durationMs > 0) durationMs / 1000f else 180f) / (plain.size + 1)
-            return plain.mapIndexed { index, value -> LyricLine((index + 1) * step, value) }
+            return plain.map { value -> LyricLine(0f, value, timing = LyricTiming.PLAIN, timingSource = "plain_text") }
         }
         val sorted = result.distinctBy { it.timeSec to it.text }.sortedBy { it.timeSec }
         // Only exactly equal timestamps may represent embedded original/translation pairs.

@@ -104,6 +104,8 @@ fun AppleMusicScreensaverView(
     val context = LocalContext.current
     val profile = LocalPerformanceMode.current.profile
     val effectsActive = LocalEffectsActive.current
+    val timingDisplay = rememberLyricsDisplay(lyricsLines, mediaState)
+    val lyricsLines = timingDisplay.lines
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
     var volumeLevel by remember {
@@ -190,12 +192,12 @@ fun AppleMusicScreensaverView(
     var isShuffle by remember { mutableStateOf(false) }
     var isRepeat by remember { mutableStateOf(false) }
 
-    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist)
+    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist, mediaState.songId)
     val syncOffsetSec = songSyncOffset.millis / 1000f
 
     val lyricsActiveIndex = remember(lyricsLines, currentPositionMs, syncOffsetSec) {
         val currentSec = (currentPositionMs / 1000f) + syncOffsetSec
-        val idx = lyricsLines.indexOfLast { currentSec >= it.timeSec }
+        val idx = if (mediaState.positionKnown) com.example.data.LyricPresentation.activeIndex(lyricsLines, currentSec) else -1
         if (idx == -1) -1 else idx
     }
 
@@ -299,6 +301,7 @@ fun AppleMusicScreensaverView(
                 .navigationBarsPadding()
                 .padding(horizontal = if (effectiveIsSplit) 24.dp else 16.dp, vertical = 10.dp)
         ) {
+            LyricsTimingControls(timingDisplay)
             // Optional Non-intrusive Permission Notice Pill
             if (!isPermissionGranted && onRequestPermission != null) {
                 Row(
@@ -838,7 +841,7 @@ fun AppleMusicScreensaverView(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "원터치로 실시간 싱크 및 이중 번역 가사를 즉시 감상할 수 있습니다.",
+                            text = "체험용 가사와 시각 효과를 볼 수 있습니다. 실제 음악 앱의 재생은 별도입니다.",
                             fontSize = 12.sp,
                             color = Color.White.copy(alpha = 0.6f)
                         )
@@ -875,7 +878,7 @@ fun AppleMusicScreensaverView(
                                         fontSize = 14.sp
                                     )
                                     Text(
-                                        text = "${song.artist} • ${song.bpm} BPM",
+                                        text = "${song.artist} • 효과 속도 ${song.bpm}",
                                         color = Color.White.copy(alpha = 0.6f),
                                         fontSize = 11.sp
                                     )

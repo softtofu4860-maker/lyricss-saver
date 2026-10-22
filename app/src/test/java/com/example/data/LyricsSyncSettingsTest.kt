@@ -11,6 +11,17 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class LyricsSyncSettingsTest {
+    @Test fun `legacy offset is preserved and claimed by only the first recording`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("lyrics_sync", 0).edit().clear().commit()
+        val old = LyricsSyncSettings(context, "song", "artist")
+        old.set(850)
+        val studio = SongDescriptor("song", "artist", "studio", 180000)
+        val live = studio.copy(album = "live", durationMs = 240000)
+        assertEquals(850L, LyricsSyncSettings(context, "song", "artist", studio.id).get())
+        assertEquals(0L, LyricsSyncSettings(context, "song", "artist", live.id).get())
+        assertEquals(850L, old.get())
+    }
     @Test fun `offset is persisted per song shared across consumers and bounded`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lyrics_sync", Context.MODE_PRIVATE).edit().clear().commit()

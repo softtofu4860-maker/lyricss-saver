@@ -44,7 +44,9 @@ class LyricsParserTest {
         val parsed = LyricsParser.parse("[offset:2000]\n[00:01.00]Hello\n[broken timestamp]")
         assertEquals(0f, parsed.single().timeSec, 0f)
         assertEquals(listOf("one", "two"), LyricsParser.parse("[ar:Artist]\none\n\ntwo", 9000).map { it.text })
-        assertEquals(listOf(3f, 6f), LyricsParser.parse("one\ntwo", 9000).map { it.timeSec })
+        val plain = LyricsParser.parse("one\ntwo", 9000)
+        assertEquals(listOf(0f, 0f), plain.map { it.timeSec })
+        assertTrue(plain.all { it.timing == LyricTiming.PLAIN })
     }
 
     @Test fun `word timings survive JSON cache and old cached lines still deserialize`() {

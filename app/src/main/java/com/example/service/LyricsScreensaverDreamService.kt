@@ -50,7 +50,6 @@ class LyricsScreensaverDreamService : DreamService(),
     private val viewModelStoreInstance = ViewModelStore()
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
-    private val spotifyReceiver = SpotifyBroadcastReceiver()
     private lateinit var repository: LyricsRepository
 
     override val lifecycle: Lifecycle get() = lifecycleRegistry
@@ -62,7 +61,6 @@ class LyricsScreensaverDreamService : DreamService(),
         savedStateRegistryController.performRestore(Bundle())
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         repository = LyricsRepository(this)
-        SpotifyBroadcastReceiver.register(this, spotifyReceiver)
     }
 
     override fun onAttachedToWindow() {
@@ -110,7 +108,6 @@ class LyricsScreensaverDreamService : DreamService(),
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         viewModelStoreInstance.clear()
         serviceScope.cancel()
-        SpotifyBroadcastReceiver.unregister(this, spotifyReceiver)
         super.onDestroy()
     }
 }
@@ -130,7 +127,7 @@ private fun DreamScreensaverScreen(
     var automaticJob by remember { mutableStateOf<Job?>(null) }
 
     // 곡이 바뀌면 가사 로드
-    LaunchedEffect(mediaState.title, mediaState.artist, mediaState.lyrics, mediaState.durationMs) {
+    LaunchedEffect(mediaState.songId, mediaState.lyrics, mediaState.durationMs) {
         automaticJob = currentCoroutineContext()[Job]
         correctionJob?.cancel()
         lyrics = emptyList()
@@ -138,7 +135,7 @@ private fun DreamScreensaverScreen(
         val artist = mediaState.artist.orEmpty()
         if (!title.isNullOrBlank()) {
             try {
-                repository.observeAutomaticLyrics(title, artist, mediaState.lyrics, mediaState.durationMs).collect { cached ->
+                repository.observeAutomaticLyrics(title, artist, mediaState.lyrics, mediaState.durationMs, mediaState.song).collect { cached ->
                     lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
                 }
             } catch (e: CancellationException) {
@@ -172,7 +169,7 @@ private fun DreamScreensaverScreen(
                                 title = title,
                                 artist = artist,
                                 durationMs = mediaState.durationMs,
-                                customQuery = q
+                                customQuery = q, descriptor = mediaState.song
                             )
                             lyrics = GeminiLyricsService.parseJsonLyrics(cached.lyricsJson)
                         } catch (e: CancellationException) {
@@ -187,7 +184,7 @@ private fun DreamScreensaverScreen(
                     val artist = mediaState.artist ?: ""
                     correctionJob?.cancel()
                     correctionJob = correctionScope.launch {
-                        repository.saveManualLyrics(title, artist, newLines)
+                        repository.saveManualLyrics(title, artist, newLines, mediaState.song)
                     }
                 }
             )

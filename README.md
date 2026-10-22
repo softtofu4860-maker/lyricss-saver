@@ -4,14 +4,14 @@
 
 # 스마트 음악 화면보호기 (Smart Music Screensaver)
 
-재생 중인 시스템 음악을 정밀하게 분석하여 가사 싱크와 비주얼 연동을 띄워주는 미학적인 안드로이드 화면보호기입니다.
+음악 앱이 제공한 재생 정보와 가사를 테마 애니메이션과 함께 표시하는 안드로이드 화면보호기입니다. 실제 오디오 분석은 하지 않습니다.
 
 ## 🎨 화면보호기 테마 종류 (Dual Themes)
 
 화면보호기 화면을 한 번 탭하면 나타나는 컨트롤 바의 **팔레트(🎨) 아이콘**을 눌러 언제든지 테마를 전환할 수 있습니다.
 
 1. **클래식 네온 테마 (Classic Neon Theme)**
-   - 음악의 주파수와 비트에 맞춰 반응하는 네온 스펙트럼 비주얼라이저가 제공됩니다.
+   - 선택한 효과 속도로 움직이는 네온 스펙트럼 애니메이션을 제공합니다. 실제 오디오 주파수나 BPM을 측정하지 않습니다.
    - 앨범 아트를 미세하게 다운스케일 후 부드러운 가우시안 블러 처리를 하여 연출한 심플하고 감각적인 앰비언트 배경 테마입니다.
 
 2. **풀 아트 미니멀 테마 (Full Art Minimal Theme) [NEW]**
@@ -29,9 +29,17 @@
 1. Open Android Studio
 2. Select **Open** and choose the directory containing this project
 3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+4. Build the debug variant for development. In the app dashboard, configure your personal Gemini key for translation. Keys are not built into the APK.
+5. Run the app on an emulator or physical device. Grant notification access to read authorized music MediaSessions.
+6. For a signed release, supply `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and `RELEASE_KEY_PASSWORD` through your local environment or CI secret store. Missing signing credentials produce an unsigned release artifact; do not distribute it as an installable release.
+
+## 싱크·번역·연동 수정
+
+- 타임스탬프가 있는 LRC/YRC만 싱크 강조·가사 터치 탐색에 사용합니다. 일반 가사는 기본적으로 자동 강조하지 않으며, 화면의 **추정 스크롤 켜기**로만 추정 이동을 선택할 수 있습니다. 이전 캐시 중 출처가 없는 시간은 `기존 가사 · 시간 출처 미확인`으로 표시하고 원래 데이터를 유지합니다.
+- 번역은 입력한 개인 키를 Android Keystore의 AES-GCM 키로 암호화해 저장하고 `x-goog-api-key` 헤더로 보냅니다. 키 미설정·인증·한도·네트워크·서버·빈 결과를 구분하며 원문과 원래 타이밍은 유지합니다. 기존 평문 키는 암호화 저장·검증 성공 후 제거합니다. 실패 시 기존 키를 파괴하지 않고 설정 오류를 표시합니다.
+- 음악 상태는 OS가 허용한 MediaSession만 사용합니다. 검증할 수 없는 Spotify 방송의 수신·중복 등록은 제거했습니다. 재생 위치는 세션 갱신 시각과 단조 시계로 계산합니다.
+- 제공처 ID가 있으면 제공처+ID를, 없으면 앨범·재생 길이를 추가해 저장·보정값을 구분합니다. 기존 보호 데이터는 한 버전에만 최초 연결하고 원본을 보존합니다. ID가 없고 앨범·길이까지 동일한 녹음은 구별할 수 없습니다.
+- 자세한 수정 범위와 자동 테스트/실기기 검증 구분은 [유지보수 검증 보고서](docs/maintenance-verification.md)를 참고하세요.
 
 
 ## 가사 저장 및 캐시 동작
@@ -43,7 +51,7 @@ Enhanced LRC·YRC 단어 타이밍, 여러 타임스탬프·오프셋 처리, Ne
 - 곡을 감지하면 자동으로 검색합니다. 공식 영상·가사 표시 문구를 정리한 제목으로 정확 조회한 뒤, 제목+아티스트·아티스트 별칭·제목만 검색을 최대 3개 검색어로 시도합니다. 수동 검색과 같은 LRCLIB·NetEase 검색 API를 사용합니다.
 - 한글·영문 아티스트 병기, 참여 가수 목록, `- Topic` 표기를 처리합니다. 제목·아티스트·곡 길이를 검증하고 라이브/리믹스 등 다른 버전은 구분합니다. LRCLIB에 곡 길이가 있으면 12초를 넘게 차이 나는 버전은 제외합니다. 아티스트 정보가 없어도 검색하되 동일 제목의 여러 가수가 매칭되면 임의 선택하지 않습니다.
 - 검색 실패나 일시적인 연결 오류는 2초·8초 간격으로 최대 두 번 자동 재시도합니다. 성공·곡 변경·수동 교정 시 재시도를 중단합니다. LRCLIB 조회는 한 시도당 최대 10초, NetEase는 최대 8초로 제한합니다. 메타데이터를 검증할 수 없는 Spotify 프록시는 자동 선택에 사용하지 않습니다.
-- 가사 교정의 DB 검색은 현재 곡과 가까운 LRCLIB 후보를 먼저 표시하며, 곡 길이·일치 여부·싱크 가사 여부를 확인하고 직접 적용할 수 있습니다. 일반 가사의 타이밍은 추정값입니다.
+- 가사 교정의 DB 검색은 현재 곡과 가까운 LRCLIB 후보를 먼저 표시하며, 곡 길이·일치 여부·싱크 가사 여부를 확인하고 직접 적용할 수 있습니다. 일반 가사에는 기본적으로 시간이 없으며, 사용자가 추정 스크롤을 켠 경우에만 추정 시간을 사용합니다.
 - NetEase 수동 선택은 선택한 곡 ID로 가사를 가져옵니다. 검색을 다시 실행하거나 창을 닫으면 이전 요청을 취소합니다. 가사가 없는 항목의 안내문은 적용할 수 없습니다.
 
 - 수동 재검색은 기존 캐시와 메타데이터를 건너뛰고 입력한 검색어로 검색합니다. 실패한 검색 안내문은 저장하지 않으며, 기존 편집본도 삭제하지 않습니다.

@@ -252,7 +252,7 @@ fun AppleMusicLyricsView(
                         ) {
                             // Instant Seek to clicked lyric line
                             val seekMs = ((line.timeSec - effectiveOffset) * 1000).toLong().coerceAtLeast(0L)
-                            onLineClicked(seekMs)
+                            if (com.example.data.LyricPresentation.canSeek(line)) onLineClicked(seekMs)
                             isUserBrowsing = false
 
                             // Smooth scroll to center on tapped line immediately
@@ -279,7 +279,7 @@ fun AppleMusicLyricsView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            if (isUserBrowsing || isActive) {
+                            if ((isUserBrowsing || isActive) && com.example.data.LyricPresentation.canSeek(line)) {
                                 Surface(
                                     shape = RoundedCornerShape(6.dp),
                                     color = if (isActive) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.14f),
@@ -306,7 +306,7 @@ fun AppleMusicLyricsView(
                                 }
                             }
 
-                            if (isCenterPreview) {
+                            if (isCenterPreview && com.example.data.LyricPresentation.canSeek(line)) {
                                 Text(
                                     text = "터치하여 이 위치로 이동",
                                     fontSize = 11.sp,
@@ -548,7 +548,7 @@ fun AppleMusicLyricsView(
                 .padding(top = 16.dp)
         ) {
             val previewLine = lines.getOrNull(centerLineIndex)
-            if (previewLine != null) {
+            if (previewLine != null && com.example.data.LyricPresentation.canSeek(previewLine)) {
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = Color.Black.copy(alpha = 0.75f),
@@ -558,7 +558,7 @@ fun AppleMusicLyricsView(
                         .padding(horizontal = 20.dp)
                         .clickable {
                             val seekMs = ((previewLine.timeSec - effectiveOffset) * 1000).toLong().coerceAtLeast(0L)
-                            onLineClicked(seekMs)
+                            if (com.example.data.LyricPresentation.canSeek(previewLine)) onLineClicked(seekMs)
                             isUserBrowsing = false
                         }
                 ) {

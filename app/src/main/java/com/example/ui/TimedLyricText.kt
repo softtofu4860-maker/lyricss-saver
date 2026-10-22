@@ -29,7 +29,7 @@ internal fun highlightedLyrics(line: LyricLine, timeSec: Float): AnnotatedString
 internal fun TimedLyricText(line: LyricLine, text: String, active: Boolean,
                             mediaState: MediaState?, offsetSec: Float,
                             style: TextStyle, modifier: Modifier = Modifier) {
-    val timed = active && LocalPerformanceMode.current.profile.richEffects && mediaState != null &&
+    val timed = active && line.timing == com.example.data.LyricTiming.SYNCED && LocalPerformanceMode.current.profile.richEffects && mediaState != null &&
         line.words.isNotEmpty() && text == line.text && line.words.joinToString("") { it.text } == text
     if (timed) {
         val position by rememberPlaybackPosition(mediaState!!)

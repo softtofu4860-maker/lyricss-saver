@@ -37,7 +37,7 @@ class LyricsMigrationTest {
             old.version = 2
         }
         val database = Room.databaseBuilder(context, LyricsDatabase::class.java, name)
-            .addMigrations(LyricsDatabase.MIGRATION_2_3).allowMainThreadQueries().build()
+            .addMigrations(LyricsDatabase.MIGRATION_2_3, LyricsDatabase.MIGRATION_3_4).allowMainThreadQueries().build()
         try {
             val dao = database.lyricsDao()
             val japanese = dao.getLyricsById(SongIdentity.id("夜に駆ける", "歌手"))!!

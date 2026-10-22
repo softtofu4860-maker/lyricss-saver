@@ -12,29 +12,26 @@ android {
         applicationId = "com.aistudio.musicscreensaver.vjpxq"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1.0"
+    }
 
-        val geminiKey = (project.findProperty("GEMINI_API_KEY") as? String)
-            ?: System.getenv("GEMINI_API_KEY")
-            ?: run {
-                val envFile = rootProject.file(".env")
-                if (envFile.exists()) {
-                    val match = Regex("(?m)^GEMINI_API_KEY=(.*)$").find(envFile.readText())
-                    match?.groupValues?.get(1)?.trim()?.removeSurrounding("\"")
-                } else null
-            }
-            ?: run {
-                val devEnv = file("/app/.dev.env.json")
-                if (devEnv.exists()) {
-                    val match = Regex("\"GEMINI_API_KEY\"\\s*:\\s*\"([^\"]+)\"").find(devEnv.readText())
-                    match?.groupValues?.get(1)
-                } else null
-            } ?: ""
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
+    val releasePath = System.getenv("RELEASE_STORE_FILE")
+    val releaseStorePassword = System.getenv("RELEASE_STORE_PASSWORD")
+    val releaseAlias = System.getenv("RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+    val hasReleaseSigning = listOf(releasePath, releaseStorePassword, releaseAlias, releaseKeyPassword).all { !it.isNullOrBlank() }
+    check(hasReleaseSigning || listOf(releasePath, releaseStorePassword, releaseAlias, releaseKeyPassword).all { it.isNullOrBlank() }) {
+        "Release signing requires all four RELEASE_STORE_FILE / RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD settings."
     }
 
     signingConfigs {
+        if (hasReleaseSigning) create("production") {
+            storeFile = file(releasePath!!)
+            storePassword = releaseStorePassword
+            keyAlias = releaseAlias
+            keyPassword = releaseKeyPassword
+        }
         create("debugConfig") {
             storeFile = file("${rootDir}/debug.keystore")
             storePassword = "android"
@@ -44,7 +41,12 @@ android {
     }
 
     buildTypes {
+        release {
+            isDebuggable = false
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("production")
+        }
         debug {
+            isDebuggable = true
             signingConfig = signingConfigs.getByName("debugConfig")
         }
     }

@@ -38,6 +38,26 @@ class LyricsRepositoryTest {
         SongIdentity.id(title, "artist"), title, "artist",
         GeminiLyricsService.lyricAdapter.toJson(listOf(LyricLine(1f, text))))
 
+    @Test fun `legacy protected translations bind once without leaking into another recording`() = runTest {
+        val original = song().copy(isUserSaved = true,
+            lyricsJson = GeminiLyricsService.lyricAdapter.toJson(listOf(LyricLine(1f, "edited", translation = "보존"))))
+        dao.insertLyrics(original)
+        var fetches = 0
+        val repository = LyricsRepository(dao, { fetches++; song(text = "other recording") }, StandardTestDispatcher(testScheduler))
+        val studio = SongDescriptor("song", "artist", "studio", 180000)
+        val live = studio.copy(album = "live", durationMs = 240000)
+        val claimed = repository.getLyrics("song", "artist", descriptor = studio)
+        assertEquals(studio.id, claimed.id)
+        assertEquals("보존", GeminiLyricsService.parseJsonLyrics(claimed.lyricsJson).single().translation)
+        assertEquals(0, fetches)
+        val other = repository.getLyrics("song", "artist", descriptor = live)
+        assertEquals(live.id, other.id)
+        assertEquals("other recording", GeminiLyricsService.parseJsonLyrics(other.lyricsJson).single().text)
+        assertEquals(1, fetches)
+        assertEquals(original.lyricsJson, dao.getLyricsById(original.id)!!.lyricsJson)
+        assertEquals(studio.id, dao.getLyricsById(original.id)!!.identityBinding)
+    }
+
     @Test fun `automatic lookup retries network failure without manual input and then caches success`() = runTest {
         var calls = 0
         val repository = LyricsRepository(dao, { request ->

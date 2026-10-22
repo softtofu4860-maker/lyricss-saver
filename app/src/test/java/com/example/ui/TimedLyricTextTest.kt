@@ -23,7 +23,7 @@ class TimedLyricTextTest {
     @get:Rule val compose = createComposeRule()
 
     @Test fun `word highlighting follows paused playback and low mode keeps plain text`() {
-        val line = LyricLine(1f, "Hi there", words = listOf(
+        val line = LyricLine(1f, "Hi there", timing = com.example.data.LyricTiming.SYNCED, words = listOf(
             LyricWord(1f, 2f, "Hi "), LyricWord(2f, 3f, "there")))
         val mode = mutableStateOf(PerformanceMode.HIGH)
         compose.setContent {

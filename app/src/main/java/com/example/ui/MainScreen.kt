@@ -79,6 +79,7 @@ fun MainScreen(
     val artwork = rememberBoundedArtwork(rawMediaState.albumArt, LocalPerformanceMode.current.profile.artworkMaxEdge)
     val mediaState = remember(rawMediaState, artwork) { rawMediaState.copy(albumArt = artwork) }
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
+    val translationStatus by viewModel.translationStatus.collectAsStateWithLifecycle()
     val savedLyrics by viewModel.savedLyrics.collectAsStateWithLifecycle()
 
     var isPermissionEnabled by remember {
@@ -89,18 +90,10 @@ fun MainScreen(
     var screensaverActive by remember { mutableStateOf(true) }
     var selectedVisualizerMode by remember { mutableStateOf(VisualizerMode.NEBULA_RING) }
 
-    // On initial launch, start sample song if no track is playing so preview and downloaded APK immediately show live music & lyrics
-    LaunchedEffect(Unit) {
-        if (mediaState.title.isNullOrEmpty()) {
-            val sample = com.example.data.SampleDataProvider.getSampleSongs().first()
-            com.example.data.SampleDataProvider.playSampleSong(sample)
-            viewModel.loadLyricsFromLibrary(sample)
-        }
-    }
 
     // Periodically poll for the permission status only if it's currently disabled, stopping completely once enabled!
-    LaunchedEffect(isPermissionEnabled, effectsActive) {
-        if (!isPermissionEnabled && effectsActive) {
+    LaunchedEffect(effectsActive) {
+        if (effectsActive) {
             while (true) {
                 isPermissionEnabled = MusicNotificationListener.isNotificationServiceEnabled(context)
                 delay(4000)
@@ -208,6 +201,7 @@ fun MainScreen(
                 }
                 else -> {
                     DashboardScreen(
+                        translationStatus = translationStatus,
                         mediaState = mediaState,
                         lyricsState = lyricsState,
                         savedLyrics = savedLyrics,
@@ -285,7 +279,7 @@ fun PermissionOnboardingScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = "기기에서 재생 중인 소리를 감지하여 요동치는 비트 시각 효과와 함께 노래 진도에 딱 맞는 실시간 가사를 띄워줍니다.",
+            text = "음악 앱이 제공한 재생 정보와 가사를 표시합니다. 시각 효과는 오디오 분석이 아닌 장식 애니메이션입니다.",
             fontSize = 15.sp,
             color = Color.White.copy(alpha = 0.7f),
             textAlign = TextAlign.Center,
@@ -319,7 +313,7 @@ fun PermissionOnboardingScreen(
                 PermissionFeatureRow(
                     icon = Icons.Rounded.BubbleChart,
                     title = "지능형 오라 시각화",
-                    desc = "추출된 곡의 템포(BPM) 및 장르 분위기에 알맞는 고해상도 테마 비주얼라이저를 그립니다."
+                    desc = "사용자가 선택한 효과 속도로 테마 애니메이션을 표시합니다. 실제 곡 BPM을 측정하지 않습니다."
                 )
             }
         }
@@ -434,6 +428,7 @@ fun PermissionFeatureRow(
 
 @Composable
 fun DashboardScreen(
+    translationStatus: String? = null,
     mediaState: com.example.service.MediaState,
     lyricsState: LyricsUiState,
     savedLyrics: List<com.example.data.CachedLyrics>,
@@ -449,7 +444,6 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     val sharedPrefs = remember { context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE) }
-    var userApiKey by remember { mutableStateOf(sharedPrefs.getString("gemini_api_key", "") ?: "") }
     var showKeyDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var selectedDetailSong by remember { mutableStateOf<com.example.data.CachedLyrics?>(null) }
@@ -746,7 +740,7 @@ fun DashboardScreen(
                 }
 
                 Text(
-                    text = "• 화면보호기 실행 시 OLED 번인 방지 및 실시간 저전력 모니터링 연동\n• 가사 터치 탐색 활성화: 가사 구절 클릭 시 해당 타임스탬프로 즉시 재생 이동",
+                    text = "• 화면을 조금씩 이동해 고정 표시를 줄입니다. 번인 방지를 보장하지 않습니다.\n• 실제 싱크 가사만 터치하여 해당 재생 위치로 이동할 수 있습니다.",
                     fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.5f),
                     lineHeight = 16.sp
@@ -784,7 +778,7 @@ fun DashboardScreen(
 
                 VisualizerModeCard(
                     title = "리퀴드 웨이브",
-                    desc = "부드러운 주파수 파형",
+                    desc = "장식용 파형 애니메이션",
                     mode = VisualizerMode.LIQUID_WAVES,
                     selected = selectedMode == VisualizerMode.LIQUID_WAVES,
                     onClick = { onModeSelected(VisualizerMode.LIQUID_WAVES) },
@@ -856,14 +850,14 @@ fun DashboardScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "실시간 싱크로 가사 준비 완료 (${lyricsState.parsedLines.size} 소절)",
+                                        text = if (lyricsState.cachedLyrics.isFallback) "일치하는 가사를 찾지 못했습니다" else "${com.example.data.LyricPresentation.mode(lyricsState.parsedLines).label} (${lyricsState.parsedLines.size} 소절)",
                                         fontSize = 13.sp,
                                         color = Color(0xFF4ADE80),
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
                                 Text(
-                                    text = "곡 템포: ${lyricsState.cachedLyrics.bpm} BPM | 장르: ${lyricsState.cachedLyrics.genre ?: "일반"}",
+                                    text = "효과 속도: ${lyricsState.cachedLyrics.bpm} · 오디오 BPM 측정값이 아닙니다",
                                     fontSize = 12.sp,
                                     color = Color.White.copy(alpha = 0.5f)
                                 )
@@ -887,7 +881,7 @@ fun DashboardScreen(
                     }
 
                     val needsTranslation = remember(lyricsState) {
-                        (lyricsState as? LyricsUiState.Success)?.parsedLines?.any { line ->
+                        (lyricsState as? LyricsUiState.Success)?.takeUnless { it.cachedLyrics.isFallback }?.parsedLines?.any { line ->
                             line.text.isNotBlank() && line.translation.isNullOrBlank() &&
                                 line.text.none { it in '\uAC00'..'\uD7A3' }
                         } == true
@@ -896,6 +890,7 @@ fun DashboardScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         Button(
                             onClick = onTranslateRequested,
+                            enabled = translationStatus != "번역 중…",
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF27272A),
                                 contentColor = Color.White
@@ -918,6 +913,8 @@ fun DashboardScreen(
                             )
                         }
                     }
+
+                    translationStatus?.let { Text(it, color = Color(0xFFE2E8F0), fontSize = 12.sp) }
 
                     Spacer(modifier = Modifier.height(14.dp))
                     
@@ -966,164 +963,7 @@ fun DashboardScreen(
     }
 
     // 5. Dual Mode Status & API Key Setting Card
-    val apiKeySettingContent = @Composable {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF131318)),
-            shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "가사 연동 모드",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.9f)
-                    )
-                    
-                    TextButton(
-                        onClick = { showKeyDialog = true },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.VpnKey,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (userApiKey.isNotEmpty()) "API 키 수정" else "개인 API 키 설정",
-                            fontSize = 12.sp,
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                val hasBuildKey = com.example.BuildConfig.GEMINI_API_KEY.isNotEmpty() && com.example.BuildConfig.GEMINI_API_KEY != "MY_GEMINI_API_KEY"
-                val isAiMode = userApiKey.isNotEmpty() || hasBuildKey
-                
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .background(
-                                color = if (isAiMode) Color(0xFFD8B4FE) else Color(0xFF4ADE80),
-                                shape = CircleShape
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isAiMode) "AI 고급 모드 (Gemini 실시간 연동)" else "기본 모드 (무료 LRCLIB 연동)",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isAiMode) Color(0xFFD8B4FE) else Color(0xFF4ADE80)
-                    )
-                }
-                
-                Spacer(modifier = Modifier.height(4.dp))
-                
-                Text(
-                    text = if (isAiMode) {
-                        if (userApiKey.isNotEmpty()) "가사 검색은 공개 데이터베이스를 사용합니다. 현재 번역 기능은 빌드에 설정된 Gemini API 키를 사용합니다."
-                        else "가사 검색에는 API 키가 필요하지 않습니다. Gemini는 빌드에 설정된 API 키로 가사 번역에 사용됩니다."
-                    } else {
-                        "LRCLIB와 NetEase에서 제목·아티스트가 일치하는 가사를 검색합니다. 곡에 따라 가사가 없거나 싱크 정보가 없을 수 있습니다."
-                    },
-                    fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.5f),
-                    lineHeight = 15.sp
-                )
-            }
-        }
-
-        if (showKeyDialog) {
-            var tempKey by remember { mutableStateOf(userApiKey) }
-            AlertDialog(
-                onDismissRequest = { showKeyDialog = false },
-                title = {
-                    Text(
-                        text = "Gemini API 개인 키 설정",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = "AI 고급 모드를 사용하려면 Google AI Studio에서 발급받은 API 키를 입력해 주세요.",
-                            fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.7f),
-                            lineHeight = 18.sp
-                        )
-                        Text(
-                            text = "※ API 키 발급은 PC에서만 가능합니다.",
-                            fontSize = 12.sp,
-                            color = Color(0xFFFFB74D), // Warning amber/orange color
-                            fontWeight = FontWeight.Bold
-                        )
-                        OutlinedTextField(
-                            value = tempKey,
-                            onValueChange = { tempKey = it },
-                            placeholder = { Text("AIzaSy...", color = Color.White.copy(alpha = 0.3f)) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color.White,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (tempKey.isNotEmpty()) {
-                            Text(
-                                text = "개인 키 저장은 지원하지만 현재 번역 요청에는 빌드에 설정된 키가 사용됩니다. AI가 누락된 가사나 정확한 싱크를 생성하는 기능은 제공하지 않습니다.",
-                                fontSize = 11.sp,
-                                color = Color.White.copy(alpha = 0.7f),
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            sharedPrefs.edit().putString("gemini_api_key", tempKey.trim()).apply()
-                            userApiKey = tempKey.trim()
-                            showKeyDialog = false
-                            onClearCacheClicked() // Triggers reload with new key configuration
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.White,
-                            contentColor = Color.Black
-                        )
-                    ) {
-                        Text("저장", color = Color.Black, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showKeyDialog = false }) {
-                        Text("취소", color = Color.White.copy(alpha = 0.6f))
-                    }
-                },
-                containerColor = Color(0xFF131318)
-            )
-        }
-    }
+    val apiKeySettingContent = @Composable { ApiKeySettings() }
 
     val systemDreamContent = @Composable {
         Card(
@@ -1784,6 +1624,8 @@ fun ImmersiveScreensaverView(
     }
 
     val rawPrimary = vibeColors.getOrElse(0) { Color(0xFF38BDF8) }
+    val timingDisplay = rememberLyricsDisplay(lyricsLines, mediaState)
+    val lyricsLines = timingDisplay.lines
     val rawSecondary = vibeColors.getOrElse(1) { Color(0xFF818CF8) }
 
     // Convert neon vivid colors into modern, eye-friendly desaturated slate tones
@@ -1832,7 +1674,7 @@ fun ImmersiveScreensaverView(
     var currentPositionMs by rememberPlaybackPosition(mediaState)
 
     // Feature 5: Lyric Sync Calibration and OLED Burn-in drift
-    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist)
+    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist, mediaState.songId)
     val syncOffsetMs = songSyncOffset.millis
     var driftX by remember { mutableStateOf(0f) }
     var driftY by remember { mutableStateOf(0f) }
@@ -1841,7 +1683,7 @@ fun ImmersiveScreensaverView(
 
     val lyricsActiveIndex = remember(lyricsLines, calibratedPositionMs) {
         val currentSec = calibratedPositionMs / 1000f
-        val idx = lyricsLines.indexOfLast { currentSec >= it.timeSec }
+        val idx = if (mediaState.positionKnown) com.example.data.LyricPresentation.activeIndex(lyricsLines, currentSec) else -1
         if (idx == -1) -1 else idx
     }
 
@@ -2574,6 +2416,7 @@ fun ImmersiveScreensaverView(
         }
     }
 
+        LyricsTimingControls(timingDisplay, Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(8.dp))
         // Header Overlay (Always small and classy, animated on tap)
         AnimatedVisibility(
             visible = showControls,
@@ -3268,7 +3111,7 @@ fun parseSongBookmarks(lines: List<com.example.data.LyricLine>, durationMs: Long
     val list = mutableListOf<SongBookmark>()
     
     // Check if we can extract headings from bracketed lyrics
-    for (line in lines) {
+    for (line in lines.filter { com.example.data.LyricPresentation.canSeek(it) }) {
         val t = line.text.trim()
         if (t.startsWith("[") && t.endsWith("]") && t.length > 2) {
             val label = t.substring(1, t.length - 1)
@@ -3283,15 +3126,6 @@ fun parseSongBookmarks(lines: List<com.example.data.LyricLine>, durationMs: Long
         }
     }
     
-    // Fallback if no sections are found in the text
-    if (list.isEmpty() && durationMs > 0) {
-        list.add(SongBookmark("전주", 0L))
-        list.add(SongBookmark("1절", (durationMs * 0.15f).toLong()))
-        list.add(SongBookmark("후렴 1", (durationMs * 0.38f).toLong()))
-        list.add(SongBookmark("2절", (durationMs * 0.58f).toLong()))
-        list.add(SongBookmark("후렴 2", (durationMs * 0.78f).toLong()))
-        list.add(SongBookmark("후주", (durationMs * 0.90f).toLong()))
-    }
     return list.sortedBy { it.timeMs }.take(6)
 }
 
@@ -3466,6 +3300,7 @@ fun LyricsCorrectionDialog(
     }
 
     val initialLrcText = remember(currentLines) {
+        if (currentLines.any { it.timing != com.example.data.LyricTiming.SYNCED }) return@remember currentLines.joinToString("\n") { it.text }
         currentLines.joinToString("\n") { line ->
             val totalSec = line.timeSec
             val min = (totalSec / 60).toInt()
@@ -4150,7 +3985,7 @@ fun SidebarLyricsDetailView(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "${song.bpm} BPM",
+                                text = "효과 속도 ${song.bpm}",
                                 fontSize = 10.sp,
                                 color = Color(0xFFFF8C00),
                                 fontWeight = FontWeight.Bold

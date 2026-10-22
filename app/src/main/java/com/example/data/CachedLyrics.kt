@@ -22,5 +22,7 @@ data class CachedLyrics(
     @ColumnInfo(defaultValue = "0")
     val isUserSaved: Boolean = false,
     @ColumnInfo(defaultValue = "0")
-    val isFallback: Boolean = false
+    val isFallback: Boolean = false,
+    @ColumnInfo(defaultValue = "NULL")
+    val identityBinding: String? = null
 )

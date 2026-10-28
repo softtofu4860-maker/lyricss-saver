@@ -11,6 +11,16 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class LyricsSyncSettingsTest {
+    @Test fun `offset transfers from old provider-scoped identity to stable provider identity`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("lyrics_sync", 0).edit().clear().commit()
+        val track = SongDescriptor("song", "artist", provider = "player", providerId = "track")
+        val previous = track.previousIds.single()
+        LyricsSyncSettings(context, "song", "artist", previous).set(650)
+        assertEquals(650L, LyricsSyncSettings(context, "song", "artist", track.id, track.previousIds).get())
+        val other = track.copy(providerId = "other")
+        assertEquals(0L, LyricsSyncSettings(context, "song", "artist", other.id, other.previousIds).get())
+    }
     @Test fun `legacy offset is preserved and claimed by only the first recording`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("lyrics_sync", 0).edit().clear().commit()

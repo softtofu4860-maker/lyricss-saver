@@ -31,6 +31,13 @@ class LyricsSearchRankingTest {
         assertFalse(LyricsSearchRanking.isMatch(result.copy(instrumental = true), "밤", "가수", 0))
     }
 
+    @Test fun `longer video is allowed only when title and artist match exactly`() {
+        assertTrue(LyricsSearchRanking.isMatch(song(title = "song", artist = "artist", duration = 200.0), "song", "artist", 180000))
+        assertFalse(LyricsSearchRanking.isMatch(song(title = "song", artist = "cover artist", duration = 200.0), "song", "artist", 180000))
+        assertFalse(LyricsSearchRanking.isMatch(song(title = "song live", artist = "artist", duration = 200.0), "song", "artist", 180000))
+        assertFalse(LyricsSearchRanking.isMatch(song(title = "song", artist = "artist", duration = 211.0), "song", "artist", 180000))
+    }
+
     @Test fun `display decorations featured artists aliases and topic labels can match automatically`() {
         assertTrue(LyricsSearchRanking.isMatch(song(title = "Song", artist = "IU"),
             "Song (Official Music Video)", "아이유 (IU)", 180000))

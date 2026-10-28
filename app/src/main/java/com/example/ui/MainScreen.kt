@@ -85,7 +85,7 @@ fun MainScreen(
     var isPermissionEnabled by remember {
         mutableStateOf(MusicNotificationListener.isNotificationServiceEnabled(context))
     }
-    var demoModeActive by remember { mutableStateOf(true) }
+    var demoModeActive by remember { mutableStateOf(false) }
 
     var screensaverActive by remember { mutableStateOf(true) }
     var selectedVisualizerMode by remember { mutableStateOf(VisualizerMode.NEBULA_RING) }
@@ -1674,7 +1674,7 @@ fun ImmersiveScreensaverView(
     var currentPositionMs by rememberPlaybackPosition(mediaState)
 
     // Feature 5: Lyric Sync Calibration and OLED Burn-in drift
-    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist, mediaState.songId)
+    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist, mediaState.songId, mediaState.song.previousIds)
     val syncOffsetMs = songSyncOffset.millis
     var driftX by remember { mutableStateOf(0f) }
     var driftY by remember { mutableStateOf(0f) }
@@ -2772,6 +2772,7 @@ fun PersistentControlsCard(
     syncOffsetMs: Long,
     onSyncOffsetChange: (Long) -> Unit
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2796,12 +2797,11 @@ fun PersistentControlsCard(
             WavySlider(
                 value = progressFraction.coerceIn(0f, 1f),
                 onValueChange = { fraction ->
-                    try {
-                        val newPos = (fraction * totalDuration).toLong()
-                        MusicNotificationListener.activeController?.transportControls?.seekTo(newPos)
+                    val newPos = (fraction * totalDuration).toLong()
+                    if (com.example.service.MediaControl.perform(context) { it.seekTo(newPos) }) {
                         onPositionChange(newPos)
                         onLastInteraction()
-                    } catch (e: Exception) {}
+                    }
                 },
                 isPlaying = mediaState.isPlaying,
                 bpm = 100,
@@ -2847,10 +2847,9 @@ fun PersistentControlsCard(
 
             IconButton(
                 onClick = {
-                    try {
-                        MusicNotificationListener.activeController?.transportControls?.skipToPrevious()
+                    if (com.example.service.MediaControl.perform(context) { it.skipToPrevious() }) {
                         onLastInteraction()
-                    } catch (e: Exception) {}
+                    }
                 },
                 modifier = Modifier
                     .size(42.dp)
@@ -2874,15 +2873,11 @@ fun PersistentControlsCard(
                         shape = CircleShape
                     )
                     .clickable {
-                        try {
-                            val controller = MusicNotificationListener.activeController
-                            if (mediaState.isPlaying) {
-                                controller?.transportControls?.pause()
-                            } else {
-                                controller?.transportControls?.play()
-                            }
+                        if (com.example.service.MediaControl.perform(context) {
+                            if (mediaState.isPlaying) it.pause() else it.play()
+                        }) {
                             onLastInteraction()
-                        } catch (e: Exception) {}
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -2896,10 +2891,9 @@ fun PersistentControlsCard(
 
             IconButton(
                 onClick = {
-                    try {
-                        MusicNotificationListener.activeController?.transportControls?.skipToNext()
+                    if (com.example.service.MediaControl.perform(context) { it.skipToNext() }) {
                         onLastInteraction()
-                    } catch (e: Exception) {}
+                    }
                 },
                 modifier = Modifier
                     .size(42.dp)

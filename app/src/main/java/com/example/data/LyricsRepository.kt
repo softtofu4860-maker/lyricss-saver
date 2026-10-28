@@ -88,7 +88,9 @@ class LyricsRepository internal constructor(
                 "hasLyrics" to !metadataLyrics.isNullOrBlank()))
         lock(songId).withLock {
             val cached = dao.getLyricsById(songId) ?: descriptor?.takeIf { it.id != it.legacyId }?.let {
-                dao.claimLegacy(it.legacyId, it.id)
+                (it.previousIds + it.legacyId).distinct().firstNotNullOfOrNull { previous ->
+                    dao.claimLegacy(previous, it.id)
+                }
             }
             if (query == null && cached != null && !GeminiLyricsService.isFallbackLyrics(cached) &&
                 (metadataLyrics.isNullOrBlank() || cached.isUserSaved)) {

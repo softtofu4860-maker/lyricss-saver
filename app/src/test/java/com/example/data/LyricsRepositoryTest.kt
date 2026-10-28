@@ -38,6 +38,32 @@ class LyricsRepositoryTest {
         SongIdentity.id(title, "artist"), title, "artist",
         GeminiLyricsService.lyricAdapter.toJson(listOf(LyricLine(1f, text))))
 
+    @Test fun `provider identity upgrade preserves the old scoped manual cache without copying to other tracks`() = runTest {
+        val descriptor = SongDescriptor("song", "artist", provider = "player", providerId = "track-1")
+        val previous = descriptor.previousIds.single()
+        val original = song().copy(id = previous, isUserSaved = true, identityBinding = previous)
+        dao.insertLyrics(original)
+        val repo = LyricsRepository(dao, { song(text = "different") }, StandardTestDispatcher(testScheduler))
+        val upgraded = repo.getLyrics("song", "artist", descriptor = descriptor)
+        assertEquals(descriptor.id, upgraded.id)
+        assertEquals(original.lyricsJson, upgraded.lyricsJson)
+        assertNotNull(dao.getLyricsById(previous))
+        val another = repo.getLyrics("song", "artist", descriptor = descriptor.copy(providerId = "track-2"))
+        assertEquals("different", GeminiLyricsService.parseJsonLyrics(another.lyricsJson).single().text)
+    }
+
+    @Test fun `album metadata gaining duration keeps protected edits and first-claim prevents cross-version copying`() = runTest {
+        val incomplete = SongDescriptor("song", "artist", album = "studio")
+        val complete = incomplete.copy(durationMs = 180000)
+        val original = song().copy(id = incomplete.id, isUserSaved = true, identityBinding = incomplete.id)
+        dao.insertLyrics(original)
+        val repo = LyricsRepository(dao, { song(text = "other version") }, StandardTestDispatcher(testScheduler))
+        assertEquals(original.lyricsJson, repo.getLyrics("song", "artist", descriptor = complete).lyricsJson)
+        assertNotNull(dao.getLyricsById(incomplete.id))
+        val other = repo.getLyrics("song", "artist", descriptor = complete.copy(durationMs = 240000))
+        assertEquals("other version", GeminiLyricsService.parseJsonLyrics(other.lyricsJson).single().text)
+    }
+
     @Test fun `legacy protected translations bind once without leaking into another recording`() = runTest {
         val original = song().copy(isUserSaved = true,
             lyricsJson = GeminiLyricsService.lyricAdapter.toJson(listOf(LyricLine(1f, "edited", translation = "보존"))))

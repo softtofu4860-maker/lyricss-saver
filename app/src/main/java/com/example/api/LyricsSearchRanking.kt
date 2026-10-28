@@ -31,8 +31,10 @@ object LyricsSearchRanking {
 
     internal fun rejectionReason(result: LrclibResponse, title: String, artist: String, durationMs: Long): String? {
         val duration = result.duration?.takeIf { it.isFinite() && it > 0 }
-        val lengthMatches = durationMs <= 0 || duration == null ||
-            abs(duration - durationMs / 1000.0) <= 12
+        val difference = if (duration == null || durationMs <= 0) 0.0 else abs(duration - durationMs / 1000.0)
+        // Allow common video intros only when title and artist match exactly.
+        val lengthMatches = difference <= 12 || (difference <= 30 && artist.isNotBlank() &&
+            titleSimilarity(title, result.trackName) == 1.0 && artistSimilarity(artist, result.artistName) == 1.0)
         return when {
             result.instrumental == true -> "instrumental"
             SongSearchMetadata.versions(title) != SongSearchMetadata.versions(result.trackName.orEmpty()) -> "version_mismatch"

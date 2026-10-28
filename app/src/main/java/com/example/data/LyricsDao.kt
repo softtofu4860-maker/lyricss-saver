@@ -12,7 +12,8 @@ interface LyricsDao {
     suspend fun claimLegacy(legacyId: String, newId: String): CachedLyrics? {
         getLyricsById(newId)?.let { return it }
         val legacy = getLyricsById(legacyId) ?: return null
-        if (!legacy.isUserSaved || legacy.isFallback || (legacy.identityBinding != null && legacy.identityBinding != newId)) return null
+        if (!legacy.isUserSaved || legacy.isFallback ||
+            (legacy.identityBinding != null && legacy.identityBinding != newId && legacy.identityBinding != legacyId)) return null
         insertLyrics(legacy.copy(identityBinding = newId))
         return legacy.copy(id = newId, identityBinding = newId).also { insertLyrics(it) }
     }

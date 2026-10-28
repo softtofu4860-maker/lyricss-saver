@@ -192,7 +192,7 @@ fun AppleMusicScreensaverView(
     var isShuffle by remember { mutableStateOf(false) }
     var isRepeat by remember { mutableStateOf(false) }
 
-    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist, mediaState.songId)
+    val songSyncOffset = rememberSongSyncOffset(mediaState.title, mediaState.artist, mediaState.songId, mediaState.song.previousIds)
     val syncOffsetSec = songSyncOffset.millis / 1000f
 
     val lyricsActiveIndex = remember(lyricsLines, currentPositionMs, syncOffsetSec) {
@@ -552,12 +552,10 @@ fun AppleMusicScreensaverView(
                         lyricsLines = lyricsLines,
                         activeIndex = lyricsActiveIndex,
                         onLineClicked = { seekPosMs ->
-                            currentPositionMs = seekPosMs
-                            try {
-                                val controller = MusicNotificationListener.activeController
-                                controller?.transportControls?.seekTo(seekPosMs)
-                                if (!mediaState.isPlaying) controller?.transportControls?.play()
-                            } catch (e: Exception) {}
+                            if (com.example.service.MediaControl.perform(context) {
+                                it.seekTo(seekPosMs)
+                                if (!mediaState.isPlaying) it.play()
+                            }) currentPositionMs = seekPosMs
                         },
                         fontScale = fontScale,
                         translationMode = translationMode,
@@ -638,9 +636,7 @@ fun AppleMusicScreensaverView(
                             ) {
                                 IconButton(
                                     onClick = {
-                                        try {
-                                            MusicNotificationListener.activeController?.transportControls?.skipToPrevious()
-                                        } catch (e: Exception) {}
+                                        com.example.service.MediaControl.perform(context) { it.skipToPrevious() }
                                     },
                                     modifier = Modifier.size(34.dp)
                                 ) {
@@ -649,10 +645,7 @@ fun AppleMusicScreensaverView(
 
                                 IconButton(
                                     onClick = {
-                                        try {
-                                            val c = MusicNotificationListener.activeController
-                                            if (mediaState.isPlaying) c?.transportControls?.pause() else c?.transportControls?.play()
-                                        } catch (e: Exception) {}
+                                        com.example.service.MediaControl.perform(context) { if (mediaState.isPlaying) it.pause() else it.play() }
                                     },
                                     modifier = Modifier
                                         .size(40.dp)
@@ -668,9 +661,7 @@ fun AppleMusicScreensaverView(
 
                                 IconButton(
                                     onClick = {
-                                        try {
-                                            MusicNotificationListener.activeController?.transportControls?.skipToNext()
-                                        } catch (e: Exception) {}
+                                        com.example.service.MediaControl.perform(context) { it.skipToNext() }
                                     },
                                     modifier = Modifier.size(34.dp)
                                 ) {
@@ -701,10 +692,7 @@ fun AppleMusicScreensaverView(
                         maxVolume = maxVolume,
                         audioManager = audioManager,
                         onSeekTo = { newPos ->
-                            currentPositionMs = newPos
-                            try {
-                                MusicNotificationListener.activeController?.transportControls?.seekTo(newPos)
-                            } catch (e: Exception) {}
+                            if (com.example.service.MediaControl.perform(context) { it.seekTo(newPos) }) currentPositionMs = newPos
                         },
                         onShuffleToggle = { isShuffle = !isShuffle },
                         onRepeatToggle = { isRepeat = !isRepeat },
@@ -726,12 +714,10 @@ fun AppleMusicScreensaverView(
                         lyricsLines = lyricsLines,
                         activeIndex = lyricsActiveIndex,
                         onLineClicked = { seekPosMs ->
-                            currentPositionMs = seekPosMs
-                            try {
-                                val controller = MusicNotificationListener.activeController
-                                controller?.transportControls?.seekTo(seekPosMs)
-                                if (!mediaState.isPlaying) controller?.transportControls?.play()
-                            } catch (e: Exception) {}
+                            if (com.example.service.MediaControl.perform(context) {
+                                it.seekTo(seekPosMs)
+                                if (!mediaState.isPlaying) it.play()
+                            }) currentPositionMs = seekPosMs
                         },
                         fontScale = fontScale,
                         translationMode = translationMode,
@@ -764,10 +750,7 @@ fun AppleMusicScreensaverView(
                         volumeLevel = volumeLevel,
                         maxVolume = maxVolume,
                         onSeekTo = { newPos ->
-                            currentPositionMs = newPos
-                            try {
-                                MusicNotificationListener.activeController?.transportControls?.seekTo(newPos)
-                            } catch (e: Exception) {}
+                            if (com.example.service.MediaControl.perform(context) { it.seekTo(newPos) }) currentPositionMs = newPos
                         },
                         onShuffleToggle = { isShuffle = !isShuffle },
                         onRepeatToggle = { isRepeat = !isRepeat },
@@ -791,12 +774,10 @@ fun AppleMusicScreensaverView(
                             lyricsLines = lyricsLines,
                             activeIndex = lyricsActiveIndex,
                             onLineClicked = { seekPosMs ->
-                                currentPositionMs = seekPosMs
-                                try {
-                                    val controller = MusicNotificationListener.activeController
-                                    controller?.transportControls?.seekTo(seekPosMs)
-                                    if (!mediaState.isPlaying) controller?.transportControls?.play()
-                                } catch (e: Exception) {}
+                                if (com.example.service.MediaControl.perform(context) {
+                                    it.seekTo(seekPosMs)
+                                    if (!mediaState.isPlaying) it.play()
+                                }) currentPositionMs = seekPosMs
                             },
                             fontScale = fontScale,
                             translationMode = translationMode,
@@ -1103,6 +1084,7 @@ private fun AppleMusicLeftPlayerPanel(
     onCloseClicked: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     var showOptionsMenu by remember { mutableStateOf(false) }
 
     Column(
@@ -1306,9 +1288,7 @@ private fun AppleMusicLeftPlayerPanel(
 
             IconButton(
                 onClick = {
-                    try {
-                        MusicNotificationListener.activeController?.transportControls?.skipToPrevious()
-                    } catch (e: Exception) {}
+                    com.example.service.MediaControl.perform(context) { it.skipToPrevious() }
                 },
                 modifier = Modifier.size(46.dp)
             ) {
@@ -1323,10 +1303,7 @@ private fun AppleMusicLeftPlayerPanel(
             // Big crisp Play/Pause button
             IconButton(
                 onClick = {
-                    try {
-                        val controller = MusicNotificationListener.activeController
-                        if (mediaState.isPlaying) controller?.transportControls?.pause() else controller?.transportControls?.play()
-                    } catch (e: Exception) {}
+                    com.example.service.MediaControl.perform(context) { if (mediaState.isPlaying) it.pause() else it.play() }
                 },
                 modifier = Modifier
                     .size(56.dp)
@@ -1342,9 +1319,7 @@ private fun AppleMusicLeftPlayerPanel(
 
             IconButton(
                 onClick = {
-                    try {
-                        MusicNotificationListener.activeController?.transportControls?.skipToNext()
-                    } catch (e: Exception) {}
+                    com.example.service.MediaControl.perform(context) { it.skipToNext() }
                 },
                 modifier = Modifier.size(46.dp)
             ) {
@@ -1432,6 +1407,7 @@ private fun AppleMusicPortraitTurntablePlayer(
     onVolumeChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1573,9 +1549,7 @@ private fun AppleMusicPortraitTurntablePlayer(
 
             IconButton(
                 onClick = {
-                    try {
-                        MusicNotificationListener.activeController?.transportControls?.skipToPrevious()
-                    } catch (e: Exception) {}
+                    com.example.service.MediaControl.perform(context) { it.skipToPrevious() }
                 },
                 modifier = Modifier.size(40.dp)
             ) {
@@ -1589,10 +1563,7 @@ private fun AppleMusicPortraitTurntablePlayer(
 
             IconButton(
                 onClick = {
-                    try {
-                        val controller = MusicNotificationListener.activeController
-                        if (mediaState.isPlaying) controller?.transportControls?.pause() else controller?.transportControls?.play()
-                    } catch (e: Exception) {}
+                    com.example.service.MediaControl.perform(context) { if (mediaState.isPlaying) it.pause() else it.play() }
                 },
                 modifier = Modifier
                     .size(48.dp)
@@ -1608,9 +1579,7 @@ private fun AppleMusicPortraitTurntablePlayer(
 
             IconButton(
                 onClick = {
-                    try {
-                        MusicNotificationListener.activeController?.transportControls?.skipToNext()
-                    } catch (e: Exception) {}
+                    com.example.service.MediaControl.perform(context) { it.skipToNext() }
                 },
                 modifier = Modifier.size(40.dp)
             ) {

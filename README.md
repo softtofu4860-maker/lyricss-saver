@@ -33,6 +33,8 @@
 5. Run the app on an emulator or physical device. Grant notification access to read authorized music MediaSessions.
 6. For a signed release, supply `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and `RELEASE_KEY_PASSWORD` through your local environment or CI secret store. Missing signing credentials produce an unsigned release artifact; do not distribute it as an installable release.
 
+GitHub Actions builds and tests each update and retains a development APK for seven days. Its debug signing key is temporary: it is not a production signing key and it cannot be assumed to update an APK signed by another key. A production release requires the owner's existing release certificate and securely configured signing credentials.
+
 ## 싱크·번역·연동 수정
 
 - 타임스탬프가 있는 LRC/YRC만 싱크 강조·가사 터치 탐색에 사용합니다. 일반 가사는 기본적으로 자동 강조하지 않으며, 화면의 **추정 스크롤 켜기**로만 추정 이동을 선택할 수 있습니다. 이전 캐시 중 출처가 없는 시간은 `기존 가사 · 시간 출처 미확인`으로 표시하고 원래 데이터를 유지합니다.
@@ -49,7 +51,7 @@
 Enhanced LRC·YRC 단어 타이밍, 여러 타임스탬프·오프셋 처리, NetEase 곡 링크/ID 조회, 곡별 싱크 보정값 저장을 지원합니다. 고사양 Apple Music 가사 화면은 단어별로 강조하고 저사양은 줄 단위로 표시합니다. [참고한 다섯 프로젝트·사용법·지원 범위](docs/lyrics-references.md)를 확인하세요.
 
 - 곡을 감지하면 자동으로 검색합니다. 공식 영상·가사 표시 문구를 정리한 제목으로 정확 조회한 뒤, 제목+아티스트·아티스트 별칭·제목만 검색을 최대 3개 검색어로 시도합니다. 수동 검색과 같은 LRCLIB·NetEase 검색 API를 사용합니다.
-- 한글·영문 아티스트 병기, 참여 가수 목록, `- Topic` 표기를 처리합니다. 제목·아티스트·곡 길이를 검증하고 라이브/리믹스 등 다른 버전은 구분합니다. LRCLIB에 곡 길이가 있으면 12초를 넘게 차이 나는 버전은 제외합니다. 아티스트 정보가 없어도 검색하되 동일 제목의 여러 가수가 매칭되면 임의 선택하지 않습니다.
+- 한글·영문 아티스트 병기, 참여 가수 목록, `- Topic` 표기를 처리합니다. 제목·아티스트·곡 길이를 검증하고 라이브/리믹스 등 다른 버전은 구분합니다. 일반적으로 길이 차이는 12초 이내로 제한하며, 제목과 아티스트가 정확히 일치하는 경우 영상 인트로를 고려해 최대 30초까지 허용합니다. 아티스트 정보가 없어도 검색하되 동일 제목의 여러 가수가 매칭되면 임의 선택하지 않습니다.
 - 검색 실패나 일시적인 연결 오류는 2초·8초 간격으로 최대 두 번 자동 재시도합니다. 성공·곡 변경·수동 교정 시 재시도를 중단합니다. LRCLIB 조회는 한 시도당 최대 10초, NetEase는 최대 8초로 제한합니다. 메타데이터를 검증할 수 없는 Spotify 프록시는 자동 선택에 사용하지 않습니다.
 - 가사 교정의 DB 검색은 현재 곡과 가까운 LRCLIB 후보를 먼저 표시하며, 곡 길이·일치 여부·싱크 가사 여부를 확인하고 직접 적용할 수 있습니다. 일반 가사에는 기본적으로 시간이 없으며, 사용자가 추정 스크롤을 켠 경우에만 추정 시간을 사용합니다.
 - NetEase 수동 선택은 선택한 곡 ID로 가사를 가져옵니다. 검색을 다시 실행하거나 창을 닫으면 이전 요청을 취소합니다. 가사가 없는 항목의 안내문은 적용할 수 없습니다.

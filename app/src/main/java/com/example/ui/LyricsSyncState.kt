@@ -7,9 +7,9 @@ import com.example.data.LyricsSyncSettings
 internal data class SongSyncOffset(val millis: Long, val set: (Long) -> Unit)
 
 @Composable
-internal fun rememberSongSyncOffset(title: String?, artist: String?, songId: String = com.example.data.SongIdentity.id(title.orEmpty(), artist.orEmpty())): SongSyncOffset {
+internal fun rememberSongSyncOffset(title: String?, artist: String?, songId: String = com.example.data.SongIdentity.id(title.orEmpty(), artist.orEmpty()), previousIds: List<String> = emptyList()): SongSyncOffset {
     val context = LocalContext.current
-    val settings = remember(context, title, artist, songId) { LyricsSyncSettings(context, title.orEmpty(), artist.orEmpty(), songId) }
+    val settings = remember(context, title, artist, songId, previousIds) { LyricsSyncSettings(context, title.orEmpty(), artist.orEmpty(), songId, previousIds) }
     var millis by remember(settings) { mutableLongStateOf(settings.get()) }
     DisposableEffect(settings) {
         val listener = settings.observe { millis = it }

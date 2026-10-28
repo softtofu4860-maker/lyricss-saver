@@ -16,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,6 +30,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.diagnostics.AdminSession
 import com.example.diagnostics.AdminEntryGesture
 import com.example.diagnostics.LyricsDiagnostics
+import com.example.diagnostics.ShareableDiagnostics
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -100,7 +103,9 @@ private fun AdminDiagnosticsDialog(session: AdminSession, onClose: () -> Unit) {
     var log by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var copied by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
 
     suspend fun refresh(clear: Boolean = false) {
         busy = true
@@ -108,6 +113,7 @@ private fun AdminDiagnosticsDialog(session: AdminSession, onClose: () -> Unit) {
         try {
             if (clear) LyricsDiagnostics.clear(session)
             log = LyricsDiagnostics.read(session)
+            copied = false
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: SecurityException) {
@@ -133,6 +139,14 @@ private fun AdminDiagnosticsDialog(session: AdminSession, onClose: () -> Unit) {
                     TextButton(enabled = !busy, onClick = { scope.launch { refresh(clear = true) } }) { Text("로그 비우기") }
                     TextButton(onClick = onClose) { Text("닫고 잠그기") }
                 }
+                TextButton(enabled = !busy && log.isNotBlank(), onClick = {
+                    try {
+                        session.requireUnlocked()
+                        clipboard.setText(AnnotatedString(ShareableDiagnostics.redact(log)))
+                        copied = true
+                    } catch (_: SecurityException) { log = ""; onClose() }
+                }) { Text("곡 정보 제외하고 로그 복사") }
+                if (copied) Text("곡 정보를 제외한 로그를 복사했습니다.", color = Color.White, fontSize = 12.sp)
                 error?.let { Text(it, color = Color(0xFFFDA4AF)) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (!busy && error == null && log.isBlank()) Text("아직 기록된 검색 로그가 없습니다.", color = Color.White)

@@ -4,15 +4,16 @@ import android.content.Context
 import android.content.SharedPreferences
 import java.io.Closeable
 
-class LyricsSyncSettings(context: Context, title: String, artist: String, songId: String = SongIdentity.id(title, artist)) {
+class LyricsSyncSettings(context: Context, title: String, artist: String, songId: String = SongIdentity.id(title, artist), previousIds: List<String> = emptyList()) {
     private val preferences = context.applicationContext.getSharedPreferences("lyrics_sync", Context.MODE_PRIVATE)
     private val key = songId
     init {
         val legacy = SongIdentity.id(title, artist)
         synchronized(LyricsSyncSettings::class.java) {
-            if (key != legacy && !preferences.contains(key) && preferences.contains(legacy) &&
-                preferences.getString("binding_$legacy", null).let { it == null || it == key }) {
-                check(preferences.edit().putLong(key, preferences.getLong(legacy, 0)).putString("binding_$legacy", key).commit())
+            val previous = (previousIds + legacy).firstOrNull { old -> old != key && preferences.contains(old) &&
+                preferences.getString("binding_$old", null).let { it == null || it == key } }
+            if (!preferences.contains(key) && previous != null) {
+                check(preferences.edit().putLong(key, preferences.getLong(previous, 0)).putString("binding_$previous", key).commit())
             }
         }
     }

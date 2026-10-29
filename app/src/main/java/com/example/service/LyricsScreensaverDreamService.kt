@@ -68,6 +68,12 @@ class LyricsScreensaverDreamService : DreamService(),
         isInteractive = true
         isFullscreen = true
         isScreenBright = true
+        window?.let { dreamWindow ->
+            val dim = com.example.data.DisplayPreferences.get(this).getBoolean(com.example.data.DisplayPreferences.DIM_DREAM, false)
+            dreamWindow.attributes = dreamWindow.attributes.apply {
+                screenBrightness = if (dim) 0.2f else android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            }
+        }
 
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)

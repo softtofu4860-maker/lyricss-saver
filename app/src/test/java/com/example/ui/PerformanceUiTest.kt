@@ -24,6 +24,7 @@ class PerformanceUiTest {
 
     @Before fun setUp() {
         context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences(com.example.data.DisplayPreferences.FILE, Context.MODE_PRIVATE).edit().clear().commit()
     }
 
     @Test fun `settings buttons persist selection and react to another consumers change`() {

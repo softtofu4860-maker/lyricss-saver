@@ -16,7 +16,7 @@ import android.os.Looper
 @Config(sdk = [36])
 class PerformanceSettingsTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
-    @Before fun setUp() { context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE).edit().clear().commit() }
+    @Before fun setUp() { context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE).edit().clear().commit(); context.getSharedPreferences(DisplayPreferences.FILE, Context.MODE_PRIVATE).edit().clear().commit() }
     @After fun tearDown() { setUp() }
 
     @Test fun `low memory devices default low while capable devices default high`() {
@@ -48,7 +48,7 @@ class PerformanceSettingsTest {
     }
 
     @Test fun `unknown or corrupt stored setting falls back safely`() {
-        val prefs = context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE)
+        val prefs = DisplayPreferences.get(context)
         val expected = PerformanceSettings(context).mode()
         prefs.edit().putString(PerformanceSettings.KEY, "UNKNOWN").commit()
         assertEquals(expected, PerformanceSettings(context).mode())

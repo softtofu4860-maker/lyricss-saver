@@ -153,6 +153,9 @@ internal fun rememberBoundedArtwork(source: Bitmap?, maxEdge: Int): Bitmap? {
 fun PerformanceModeSettings(modifier: Modifier = Modifier) {
     val selected = LocalPerformanceMode.current
     val select = LocalSetPerformanceMode.current
+    val context = LocalContext.current
+    val displayPrefs = remember(context) { com.example.data.DisplayPreferences.get(context) }
+    var dimDream by remember(displayPrefs) { mutableStateOf(displayPrefs.getBoolean(com.example.data.DisplayPreferences.DIM_DREAM, false)) }
     Column(modifier = modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("기기 성능 설정", color = Color.White, style = MaterialTheme.typography.titleMedium)
         PerformanceMode.entries.forEach { mode ->
@@ -169,5 +172,15 @@ fun PerformanceModeSettings(modifier: Modifier = Modifier) {
         }
         Text("선택한 모드는 앱과 시스템 화면보호기에 함께 적용됩니다.",
             color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("시스템 화면보호기 밝기 낮추기", color = Color.White, style = MaterialTheme.typography.titleSmall)
+                Text("다음 화면보호기 실행부터 적용됩니다.", color = Color.White.copy(alpha = 0.65f), style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = dimDream, onCheckedChange = {
+                dimDream = it
+                displayPrefs.edit().putBoolean(com.example.data.DisplayPreferences.DIM_DREAM, it).apply()
+            })
+        }
     }
 }

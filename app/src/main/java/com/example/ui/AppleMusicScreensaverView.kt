@@ -202,7 +202,7 @@ fun AppleMusicScreensaverView(
     }
 
     // Settings & View state
-    val sharedPrefs = remember { context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE) }
+    val sharedPrefs = remember { com.example.data.DisplayPreferences.get(context) }
     var layoutMode by remember {
         mutableStateOf(
             try {

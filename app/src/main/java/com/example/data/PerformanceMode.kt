@@ -33,7 +33,7 @@ enum class PerformanceMode(val label: String, val description: String, val profi
 }
 
 class PerformanceSettings(context: Context) {
-    private val preferences = context.applicationContext.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE)
+    private val preferences = DisplayPreferences.get(context)
     private val fallback: PerformanceMode by lazy {
         val manager = context.applicationContext.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memory = ActivityManager.MemoryInfo().also(manager::getMemoryInfo)

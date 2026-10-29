@@ -443,7 +443,6 @@ fun DashboardScreen(
     onTranslateRequested: () -> Unit
 ) {
     val context = LocalContext.current
-    val sharedPrefs = remember { context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE) }
     var showKeyDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var selectedDetailSong by remember { mutableStateOf<com.example.data.CachedLyrics?>(null) }
@@ -1593,7 +1592,7 @@ fun ImmersiveScreensaverView(
     val context = LocalContext.current
     val profile = LocalPerformanceMode.current.profile
     val effectsActive = LocalEffectsActive.current
-    val sharedPrefs = remember { context.getSharedPreferences("screensaver_prefs", Context.MODE_PRIVATE) }
+    val sharedPrefs = remember { com.example.data.DisplayPreferences.get(context) }
     var currentTheme by remember {
         mutableStateOf(
             try {
